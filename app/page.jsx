@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase, estaPermitido } from "../lib/supabaseClient";
+import Pomodoro from "../components/Pomodoro";
+import Notas from "../components/Notas";
+import Lienzo from "../components/Lienzo";
 
 const CAL_SYNC = process.env.NEXT_PUBLIC_CALENDAR_SYNC_ID;
 
@@ -82,6 +85,9 @@ export default function Inicio() {
         {[
           ["sync", "Clases Sync"],
           ["personal", "Personal"],
+          ["notas", "Notas"],
+          ["pomodoro", "Pomodoro"],
+          ["lienzo", "Lienzo"],
           ["estado", "Estado"],
         ].map(([id, nombre]) => (
           <button
@@ -98,6 +104,9 @@ export default function Inicio() {
 
       {pestana === "sync" && <CalendarioSync />}
       {pestana === "personal" && <CalendarioPersonal correo={correo} />}
+      {pestana === "notas" && <Notas correo={correo} />}
+      {pestana === "pomodoro" && <Pomodoro />}
+      {pestana === "lienzo" && <Lienzo />}
       {pestana === "estado" && <Estado sesion={sesion} />}
 
       <Pie />

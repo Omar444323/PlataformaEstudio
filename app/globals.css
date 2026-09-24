@@ -135,3 +135,94 @@ th { font-weight: 600; color: var(--tinta-suave); }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Pomodoro ---------- */
+.pomodoro { text-align: center; }
+.pomodoro .fase {
+  font-family: var(--fuente-titulo), Georgia, serif;
+  font-size: 1.1rem;
+  color: var(--tinta-suave);
+  margin: 0.5rem 0 0;
+  letter-spacing: 0.02em;
+}
+.reloj {
+  font-family: var(--fuente-titulo), Georgia, serif;
+  font-size: clamp(4rem, 16vw, 8rem);
+  font-weight: 700;
+  line-height: 1;
+  margin: 0.5rem 0 1rem;
+  font-variant-numeric: tabular-nums;
+}
+.barra {
+  display: block;
+  height: 0.55rem;
+  background: var(--rejilla);
+  border-radius: 999px;
+  overflow: hidden;
+  max-width: 34rem;
+  margin: 0 auto 1.5rem;
+}
+.barra span {
+  display: block;
+  height: 100%;
+  background: var(--marcador);
+  transition: width 0.25s linear;
+}
+.pomodoro .acciones { margin: 0 0 1rem; }
+.pomodoro details { margin-top: 1rem; text-align: left; max-width: 34rem; margin-inline: auto; }
+.ajustes { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+.ajustes label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.9rem; color: var(--tinta-suave); }
+.entrada.corta { width: 6rem; }
+
+/* ---------- Notas ---------- */
+.notas { display: grid; grid-template-columns: minmax(12rem, 16rem) 1fr; gap: 1.25rem; align-items: start; }
+@media (max-width: 42rem) { .notas { grid-template-columns: 1fr; } }
+.lista-notas ul { list-style: none; margin: 1rem 0 0; padding: 0; }
+.lista-notas li { margin-bottom: 0.4rem; }
+.item-nota {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-left: 3px solid var(--linea);
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+}
+.item-nota strong { display: block; font-weight: 600; }
+.item-nota .aviso { font-size: 0.78rem; }
+.item-nota:hover { background: var(--papel); }
+.item-nota.activa { border-left-color: var(--marcador); background: var(--papel); }
+.editor { display: flex; flex-direction: column; gap: 0.7rem; }
+.titulo-nota { width: 100%; font-weight: 600; font-size: 1.05rem; }
+.cuerpo-nota {
+  width: 100%;
+  min-height: 24rem;
+  resize: vertical;
+  line-height: 1.7;
+  font-family: var(--fuente-texto), system-ui, sans-serif;
+}
+.pie-editor { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: 0; }
+
+/* ---------- Lienzo ---------- */
+.herramientas { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 0.9rem; }
+.herramientas label { display: flex; align-items: center; gap: 0.4rem; }
+.color {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  border: 2px solid var(--linea);
+  cursor: pointer;
+  padding: 0;
+}
+.color.activo { border-color: var(--tinta); transform: scale(1.12); }
+.boton.pulsado { background: var(--marcador); border-color: var(--marcador); }
+.lienzo {
+  display: block;
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--linea);
+  touch-action: none;
+  cursor: crosshair;
+}
