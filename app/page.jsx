@@ -5,6 +5,8 @@ import { supabase, estaPermitido } from "../lib/supabaseClient";
 import Pomodoro from "../components/Pomodoro";
 import Notas from "../components/Notas";
 import Lienzo from "../components/Lienzo";
+import Horario from "../components/Horario";
+import { momento } from "../lib/horario";
 
 const CAL_SYNC = process.env.NEXT_PUBLIC_CALENDAR_SYNC_ID;
 
@@ -24,6 +26,7 @@ function urlCalendario(id, modo = "AGENDA") {
 // Iconos propios, trazo fino, heredan el color del texto.
 const I = {
   inicio: "M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z",
+  horario: "M4 5h16v14H4zM4 10h16M4 14.5h16M9.5 5v14M15 5v14",
   sync: "M5 5h14v15H5zM5 9h14M9 3v4M15 3v4M8 13h3M8 16h6",
   personal: "M5 5h14v15H5zM5 9h14M9 3v4M15 3v4M12 12.5a1.8 1.8 0 1 0 0 .01M9 17.5c.6-1.4 1.7-2 3-2s2.4.6 3 2",
   notas: "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 16.5h6",
@@ -43,15 +46,16 @@ function Icono({ d }) {
 
 const SECCIONES = [
   { grupo: null, items: [["inicio", "Inicio"]] },
-  { grupo: "Calendario", items: [["sync", "Clases"], ["personal", "Personal"]] },
+  { grupo: "Calendario", items: [["horario", "Horario"], ["sync", "Entregas"], ["personal", "Personal"]] },
   { grupo: "Estudio", items: [["notas", "Notas"], ["pomodoro", "Pomodoro"], ["lienzo", "Lienzo"]] },
   { grupo: "Mantenimiento", items: [["estado", "Sincronización"]] },
 ];
 
 const PAGINAS = {
   inicio: { titulo: "Hoy", entradilla: null },
+  horario: { titulo: "Horario", entradilla: "Tus clases de cada día, con lo que toca ahora." },
   sync: {
-    titulo: "Clases",
+    titulo: "Entregas",
     entradilla: "Copia de Blackboard. Se actualiza sola cada 6 horas.",
   },
   personal: { titulo: "Personal", entradilla: "Tu calendario de Google, solo lo ves tú." },
@@ -227,6 +231,7 @@ export default function Inicio() {
           </header>
 
           {pestana === "inicio" && <Resumen sesion={sesion} correo={correo} ir={ir} />}
+          {pestana === "horario" && <Horario />}
           {pestana === "sync" && <CalendarioSync />}
           {pestana === "personal" && <CalendarioPersonal correo={correo} />}
           {pestana === "notas" && <Notas correo={correo} />}
@@ -284,7 +289,7 @@ function Resumen({ sesion, correo, ir }) {
     <div className="resumen">
       <section className="bloque bloque-agenda">
         <div className="bloque-cabecera">
-          <h2>Próximas clases y entregas</h2>
+          <h2>Próximas entregas</h2>
           <button className="boton-texto" onClick={() => ir("sync")}>
             Ver calendario
           </button>
@@ -293,7 +298,7 @@ function Resumen({ sesion, correo, ir }) {
           <iframe
             className="marco-calendario compacto"
             src={urlCalendario(CAL_SYNC)}
-            title="Agenda de clases"
+            title="Agenda de entregas"
           />
         ) : (
           <p className="aviso">Falta la variable NEXT_PUBLIC_CALENDAR_SYNC_ID en Vercel.</p>
@@ -301,6 +306,8 @@ function Resumen({ sesion, correo, ir }) {
       </section>
 
       <div className="columna-derecha">
+        <EnClase ir={ir} />
+
         <section className="bloque">
           <div className="bloque-cabecera">
             <h2>Notas recientes</h2>
@@ -364,6 +371,47 @@ function Resumen({ sesion, correo, ir }) {
         </section>
       </div>
     </div>
+  );
+}
+
+function EnClase({ ir }) {
+  const [m, setM] = useState(null);
+  useEffect(() => {
+    setM(momento());
+    const id = setInterval(() => setM(momento()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  if (!m) return null;
+
+  const { ahora, siguiente, enRecreo, clases, min } = m;
+  const aMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+  let principal;
+  let detalle = null;
+  if (ahora) {
+    principal = ahora.nombre;
+    detalle = `${ahora.modulo} · ${ahora.profe} · hasta las ${ahora.fin}`;
+  } else if (enRecreo) {
+    principal = "Recreo";
+    detalle = siguiente ? `Después: ${siguiente.nombre} a las ${siguiente.inicio}` : null;
+  } else if (siguiente) {
+    const falta = aMin(siguiente.inicio) - min;
+    principal = siguiente.nombre;
+    detalle = `${falta <= 90 ? `Empieza en ${falta} min` : `A las ${siguiente.inicio}`} · ${siguiente.profe}`;
+  } else {
+    principal = clases.length ? "Clases terminadas por hoy" : "Hoy no hay clase";
+  }
+
+  return (
+    <section className="bloque bloque-clase-ahora" style={{ "--modulo": (ahora || (!enRecreo && siguiente) || {}).color }}>
+      <div className="bloque-cabecera">
+        <h2>{ahora ? "En clase" : enRecreo ? "Ahora" : siguiente ? "Próxima clase" : "Clases"}</h2>
+        <button className="boton-texto" onClick={() => ir("horario")}>
+          Horario
+        </button>
+      </div>
+      <p className="clase-ahora-nombre">{principal}</p>
+      {detalle && <p className="aviso">{detalle}</p>}
+    </section>
   );
 }
 
