@@ -81,7 +81,7 @@ export default function Inicio() {
       <div className="pestanas" role="tablist">
         {[
           ["sync", "Clases Sync"],
-          ["google", "Clase · Google"],
+          ["personal", "Personal"],
           ["estado", "Estado"],
         ].map(([id, nombre]) => (
           <button
@@ -97,7 +97,7 @@ export default function Inicio() {
       </div>
 
       {pestana === "sync" && <CalendarioSync />}
-      {pestana === "google" && <CalendarioGoogle />}
+      {pestana === "personal" && <CalendarioPersonal correo={correo} />}
       {pestana === "estado" && <Estado sesion={sesion} />}
 
       <Pie />
@@ -128,48 +128,52 @@ function CalendarioSync() {
   );
 }
 
-function CalendarioGoogle() {
-  const [id, setId] = useState("");
-  const [guardado, setGuardado] = useState("");
+function CalendarioPersonal({ correo }) {
+  const [otro, setOtro] = useState("");
+  const [guardado, setGuardado] = useState(null); // null = aún sin leer localStorage
 
   useEffect(() => {
-    const v = localStorage.getItem("calendarioSuscrito") || "";
-    setId(v);
+    const v = localStorage.getItem("calendarioPersonal") || "";
+    setOtro(v);
     setGuardado(v);
   }, []);
 
+  if (guardado === null) return <section className="panel"><p>Cargando…</p></section>;
+
+  const idMostrado = guardado || correo;
+
   const guardar = () => {
-    localStorage.setItem("calendarioSuscrito", id.trim());
-    setGuardado(id.trim());
+    const v = otro.trim();
+    localStorage.setItem("calendarioPersonal", v);
+    setGuardado(v);
   };
 
   return (
     <section className="panel">
-      {guardado ? (
-        <iframe
-          className="marco-calendario"
-          src={urlCalendario(guardado)}
-          title="Calendario suscrito de Blackboard"
-        />
-      ) : (
-        <p>
-          Pega el ID del calendario que suscribiste por URL. Lo encuentras en Google Calendar, en
-          la configuración de ese calendario, dentro de Integrar calendario.
-        </p>
-      )}
-      <p>
-        <input
-          className="entrada"
-          value={id}
-          onChange={(e) => setId(e.target.value)}
-          placeholder="ID del calendario suscrito"
-          aria-label="ID del calendario suscrito"
-        />{" "}
-        <button className="boton secundario" onClick={guardar}>
-          Guardar
-        </button>
+      <iframe
+        className="marco-calendario"
+        src={urlCalendario(idMostrado)}
+        title="Calendario personal"
+      />
+      <p className="aviso">
+        Tu calendario de Google ({idMostrado}). Solo se ve si en este navegador tienes la sesión
+        de esa cuenta iniciada.
       </p>
-      <p className="aviso">Se guarda solo en este navegador, así cada uno ve el suyo.</p>
+      <details>
+        <summary className="aviso">Mostrar otro calendario</summary>
+        <p>
+          <input
+            className="entrada"
+            value={otro}
+            onChange={(e) => setOtro(e.target.value)}
+            placeholder="ID de otro calendario (vacío = el tuyo)"
+            aria-label="ID de otro calendario"
+          />{" "}
+          <button className="boton secundario" onClick={guardar}>
+            Guardar
+          </button>
+        </p>
+      </details>
     </section>
   );
 }
