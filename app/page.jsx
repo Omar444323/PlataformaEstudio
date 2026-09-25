@@ -6,6 +6,7 @@ import Pomodoro from "../components/Pomodoro";
 import Notas from "../components/Notas";
 import Lienzo from "../components/Lienzo";
 import Horario from "../components/Horario";
+import Apuntes from "../components/Apuntes";
 import { momento } from "../lib/horario";
 
 const CAL_SYNC = process.env.NEXT_PUBLIC_CALENDAR_SYNC_ID;
@@ -30,6 +31,7 @@ const I = {
   sync: "M5 5h14v15H5zM5 9h14M9 3v4M15 3v4M8 13h3M8 16h6",
   personal: "M5 5h14v15H5zM5 9h14M9 3v4M15 3v4M12 12.5a1.8 1.8 0 1 0 0 .01M9 17.5c.6-1.4 1.7-2 3-2s2.4.6 3 2",
   notas: "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 16.5h6",
+  apuntes: "M5 4h9a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h9M19 4l1 1-6 6-2 .5.5-2z",
   pomodoro: "M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 9v4l2.5 2M10 2.5h4",
   lienzo: "M4 20c3 0 4-1.5 4-3.5S9.5 13 11 13s3 1 3 3M14.5 12.5 20 5l-1-1-7.5 5.5",
   estado: "M3 12h4l2.5-6 5 12 2.5-6h4",
@@ -47,7 +49,7 @@ function Icono({ d }) {
 const SECCIONES = [
   { grupo: null, items: [["inicio", "Inicio"]] },
   { grupo: "Calendario", items: [["horario", "Horario"], ["sync", "Entregas"], ["personal", "Personal"]] },
-  { grupo: "Estudio", items: [["notas", "Notas"], ["pomodoro", "Pomodoro"], ["lienzo", "Lienzo"]] },
+  { grupo: "Estudio", items: [["apuntes", "Apuntes"], ["notas", "Notas"], ["pomodoro", "Pomodoro"], ["lienzo", "Lienzo"]] },
   { grupo: "Mantenimiento", items: [["estado", "Sincronización"]] },
 ];
 
@@ -59,6 +61,7 @@ const PAGINAS = {
     entradilla: "Copia de Blackboard. Se actualiza sola cada 6 horas.",
   },
   personal: { titulo: "Personal", entradilla: "Tu calendario de Google, solo lo ves tú." },
+  apuntes: { titulo: "Apuntes", entradilla: "PDFs y cuadernos de los dos. Tus subrayados y notas solo los ves tú." },
   notas: { titulo: "Notas", entradilla: "Compartidas entre los dos. Se guardan solas." },
   pomodoro: { titulo: "Pomodoro", entradilla: null },
   lienzo: { titulo: "Lienzo", entradilla: "Pizarra rápida. Se queda en este navegador." },
@@ -84,7 +87,7 @@ export default function Inicio() {
   // La sección va en la URL (#notas) para que recargar o guardar el enlace lleve al mismo sitio.
   useEffect(() => {
     const leer = () => {
-      const h = window.location.hash.slice(1);
+      const h = window.location.hash.slice(1).split("/")[0];
       if (VALIDAS.includes(h)) setPestana(h);
     };
     leer();
@@ -234,6 +237,7 @@ export default function Inicio() {
           {pestana === "horario" && <Horario />}
           {pestana === "sync" && <CalendarioSync />}
           {pestana === "personal" && <CalendarioPersonal correo={correo} />}
+          {pestana === "apuntes" && <Apuntes correo={correo} />}
           {pestana === "notas" && <Notas correo={correo} />}
           {pestana === "pomodoro" && <Pomodoro />}
           {pestana === "lienzo" && <Lienzo />}
