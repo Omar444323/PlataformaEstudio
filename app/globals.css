@@ -879,6 +879,11 @@ th { font-weight: 600; color: var(--tinta-tenue); font-size: 0.75rem; text-trans
 .visor-estado { font-size: 0.75rem; color: var(--tinta-tenue); white-space: nowrap; }
 .visor-estado.error { color: var(--fallo); }
 .visor-estado.pendiente, .visor-estado.guardando { color: var(--tinta-suave); }
+.en-directo { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; color: var(--tinta-tenue); white-space: nowrap; }
+.en-directo .punto { background: var(--tinta-tenue); }
+.en-directo.activo { color: var(--ok); }
+.en-directo.activo .punto { background: var(--ok); }
+@media (max-width: 40rem) { .en-directo-texto { display: none; } }
 
 .herramientas-visor { flex-wrap: wrap; gap: 0.5rem; }
 .grupo-herr { display: flex; align-items: center; gap: 0.15rem; padding: 0.15rem; border-radius: 8px; background: var(--hover); }
@@ -905,14 +910,22 @@ th { font-weight: 600; color: var(--tinta-tenue); font-size: 0.75rem; text-trans
 .interruptor input { width: 1.1rem; height: 1.1rem; accent-color: var(--tinta); }
 
 .visor-hojas {
+  position: relative;
   flex: 1;
   overflow: auto;
   overscroll-behavior: contain;
+  touch-action: none; /* los gestos de dedos los gestiona la app (desplazar y pellizcar) */
+}
+/* El envoltorio crece con el zoom; así al ampliar se puede ir también hacia la izquierda */
+.hojas-zoom {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 16px;
   padding: 16px;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
 }
 .visor-aviso { margin: 3rem auto; }
 
