@@ -793,3 +793,180 @@ th { font-weight: 600; color: var(--tinta-tenue); font-size: 0.75rem; text-trans
   .horario-controles .selector button { flex: 1; padding-inline: 0.4rem; }
   .clase, .fila-recreo { grid-template-columns: 3.4rem 1fr; gap: 0.6rem; }
 }
+
+/* ---------- Apuntes: biblioteca ---------- */
+.apuntes-acciones { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 1rem; }
+.form-cuaderno {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+  padding: 0.9rem; margin-bottom: 1rem;
+  background: var(--superficie); border: 1px solid var(--linea); border-radius: var(--radio);
+}
+.form-cuaderno .entrada { width: auto; flex: 1 1 14rem; }
+.aviso-error { margin: 0 0 1rem; }
+
+.filtros { display: flex; gap: 0.4rem; overflow-x: auto; padding-bottom: 0.4rem; margin-bottom: 1.1rem; scrollbar-width: thin; }
+.filtros button {
+  flex-shrink: 0;
+  border: 1px solid var(--linea);
+  background: var(--superficie);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.82rem;
+  color: var(--tinta-suave);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.filtros button.con-docs { border-color: color-mix(in srgb, var(--modulo) 55%, var(--linea)); }
+.filtros button[aria-pressed="true"] { background: var(--tinta); border-color: var(--tinta); color: var(--papel); }
+.filtros button[aria-pressed="true"][style] { background: color-mix(in srgb, var(--modulo) 22%, var(--superficie)); border-color: var(--modulo); color: var(--tinta); font-weight: 600; }
+
+.vacio-apuntes { padding: 2.5rem 1rem; text-align: center; color: var(--tinta-suave); border: 1px dashed var(--linea); border-radius: var(--radio); background: var(--superficie); }
+
+.rejilla-docs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr)); gap: 1rem; }
+.tarjeta-doc { display: flex; flex-direction: column; background: var(--superficie); border: 1px solid var(--linea); border-radius: var(--radio); box-shadow: var(--sombra); overflow: hidden; }
+.tarjeta-abrir { display: flex; flex-direction: column; gap: 0.2rem; border: 0; background: none; padding: 0 0 0.6rem; text-align: left; cursor: pointer; }
+.tarjeta-abrir:hover .miniatura { filter: brightness(0.97); }
+.miniatura {
+  position: relative;
+  display: block;
+  aspect-ratio: 3 / 3.4;
+  margin-bottom: 0.5rem;
+  border-bottom: 3px solid var(--modulo);
+  background:
+    repeating-linear-gradient(transparent 0 13px, var(--rejilla) 13px 14px) 18% 22% / 64% 60% no-repeat,
+    #fbfbfc;
+}
+.miniatura.cuaderno {
+  background:
+    linear-gradient(var(--rejilla) 1px, transparent 1px) 0 0 / 12px 12px,
+    linear-gradient(90deg, var(--rejilla) 1px, transparent 1px) 0 0 / 12px 12px,
+    #fbfbfc;
+}
+.miniatura-tipo {
+  position: absolute; top: 0.5rem; left: 0.5rem;
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem; border-radius: 4px;
+  background: color-mix(in srgb, var(--modulo) 25%, #fff); color: #14203a;
+}
+.tarjeta-titulo { padding: 0 0.75rem; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tarjeta-meta { padding: 0 0.75rem; font-size: 0.75rem; color: var(--tinta-tenue); }
+.tarjeta-pie { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; padding: 0.45rem 0.6rem; border-top: 1px solid var(--linea); }
+.selector-asignatura { min-width: 0; flex: 1; font: inherit; font-size: 0.75rem; color: var(--tinta-suave); background: none; border: 0; padding: 0.15rem 0; cursor: pointer; }
+
+/* ---------- Apuntes: visor ---------- */
+.visor {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: #e9ecf1;
+}
+@media (prefers-color-scheme: dark) { .visor { background: #0f1217; } }
+
+.visor-barra {
+  flex-shrink: 0;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--linea);
+  padding: 0.4rem 0.75rem 0.5rem;
+  padding-top: max(0.4rem, env(safe-area-inset-top));
+  box-shadow: var(--sombra);
+}
+.visor-fila { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.visor-fila + .visor-fila { margin-top: 0.35rem; }
+.visor-titulo { flex: 1; min-width: 0; font-family: var(--fuente-titulo), Georgia, serif; font-size: 1.02rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.visor-volver { text-decoration: none; font-weight: 600; color: var(--tinta); }
+.visor-estado { font-size: 0.75rem; color: var(--tinta-tenue); white-space: nowrap; }
+.visor-estado.error { color: var(--fallo); }
+.visor-estado.pendiente, .visor-estado.guardando { color: var(--tinta-suave); }
+
+.herramientas-visor { flex-wrap: wrap; gap: 0.5rem; }
+.grupo-herr { display: flex; align-items: center; gap: 0.15rem; padding: 0.15rem; border-radius: 8px; background: var(--hover); }
+.herr {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;
+  min-width: 2.35rem; height: 2.35rem; padding: 0 0.5rem;
+  border: 0; border-radius: 6px; background: none;
+  color: var(--tinta-suave); font-size: 0.95rem; cursor: pointer;
+  touch-action: manipulation;
+}
+.herr:disabled { opacity: 0.35; cursor: default; }
+.herr[aria-pressed="true"] { background: var(--superficie); color: var(--tinta); box-shadow: var(--sombra); }
+.herr .icono { width: 1.25rem; height: 1.25rem; }
+.herr-nombre { font-size: 0.8rem; }
+.herr.grosor span { display: block; width: 1.1rem; min-height: 2px; border-radius: 99px; background: currentColor; }
+.zoom-valor { font-size: 0.78rem; font-variant-numeric: tabular-nums; min-width: 3.2rem; }
+.muestra {
+  width: 1.7rem; height: 1.7rem; margin: 0.3rem; padding: 0;
+  border-radius: 50%; border: 2px solid var(--superficie);
+  box-shadow: 0 0 0 1px var(--linea); cursor: pointer; touch-action: manipulation;
+}
+.muestra[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--tinta); }
+.interruptor { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--tinta-suave); cursor: pointer; }
+.interruptor input { width: 1.1rem; height: 1.1rem; accent-color: var(--tinta); }
+
+.visor-hojas {
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+}
+.visor-aviso { margin: 3rem auto; }
+
+.hoja {
+  position: relative;
+  flex-shrink: 0;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(20, 32, 58, 0.12), 0 6px 24px rgba(20, 32, 58, 0.08);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.hoja.cuaderno {
+  background:
+    linear-gradient(#e3e8f0 1px, transparent 1px),
+    linear-gradient(90deg, #e3e8f0 1px, transparent 1px),
+    #fff;
+  background-size: var(--celda) var(--celda);
+}
+.capa { position: absolute; inset: 0; width: 100%; height: 100%; }
+.capa-sub { mix-blend-mode: multiply; }
+.capa-vivo { touch-action: none; }
+.capa-textos { pointer-events: none; }
+
+.nota-texto { position: absolute; pointer-events: auto; line-height: 1.3; font-family: var(--fuente-texto), system-ui, sans-serif; }
+.nota-editable {
+  min-width: 2ch;
+  padding: 0 0.15em;
+  outline: none;
+  border-radius: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.nota-editable:focus { background: rgba(255, 224, 102, 0.25); box-shadow: 0 0 0 1px rgba(20, 32, 58, 0.2); }
+.nota-borrar {
+  position: absolute; top: -0.9em; right: -0.9em;
+  display: none;
+  width: 1.5rem; height: 1.5rem; font-size: 14px; line-height: 1;
+  border: 0; border-radius: 50%; background: #14203a; color: #fff; cursor: pointer;
+}
+.nota-texto:focus-within .nota-borrar { display: block; }
+
+.anadir-pagina { margin-bottom: 2rem; }
+.indicador-pagina {
+  position: fixed; right: 1rem; bottom: max(1rem, env(safe-area-inset-bottom));
+  z-index: 51;
+  padding: 0.25rem 0.6rem; border-radius: 999px;
+  background: rgba(20, 32, 58, 0.75); color: #fff;
+  font-size: 0.78rem; font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+@media (max-width: 60rem) {
+  .herr-nombre { display: none; }
+}
