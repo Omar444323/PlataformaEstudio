@@ -237,7 +237,7 @@ export default function Inicio() {
           {pestana === "horario" && <Horario />}
           {pestana === "sync" && <CalendarioSync />}
           {pestana === "personal" && <CalendarioPersonal correo={correo} />}
-          {pestana === "apuntes" && <Apuntes correo={correo} />}
+          {pestana === "apuntes" && <Apuntes correo={correo} alSalir={() => ir("inicio")} />}
           {pestana === "notas" && <Notas correo={correo} />}
           {pestana === "pomodoro" && <Pomodoro />}
           {pestana === "lienzo" && <Lienzo />}
@@ -415,6 +415,11 @@ function EnClase({ ir }) {
       </div>
       <p className="clase-ahora-nombre">{principal}</p>
       {detalle && <p className="aviso">{detalle}</p>}
+      {(ahora || (siguiente && !enRecreo) || enRecreo) && (
+        <button className="boton secundario abrir-apuntes-ahora" onClick={() => ir("apuntes")}>
+          Abrir los apuntes de ahora
+        </button>
+      )}
     </section>
   );
 }
