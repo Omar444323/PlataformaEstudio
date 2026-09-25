@@ -10,6 +10,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",
     "next": "^15.5.9",
+    "pdfjs-dist": "4.10.38",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   }
