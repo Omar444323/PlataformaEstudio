@@ -78,3 +78,32 @@ create policy "apuntes: subir" on storage.objects
   for insert with check (bucket_id = 'apuntes' and public.es_usuario_permitido());
 create policy "apuntes: borrar" on storage.objects
   for delete using (bucket_id = 'apuntes' and public.es_usuario_permitido());
+
+-- ---------------------------------------------------------------
+-- v2: carpetas por asignatura, documentos activos, lienzo y bloc de notas por asignatura
+-- ---------------------------------------------------------------
+
+-- "Activo" = lo que se está dando ahora en clase. Lo comparten los dos.
+alter table public.documentos add column if not exists activo boolean not null default false;
+
+-- Un lienzo (cuaderno en blanco) por asignatura; los trazos de cada uno siguen siendo privados.
+alter table public.documentos add column if not exists es_lienzo boolean not null default false;
+create unique index if not exists documentos_un_lienzo_por_asignatura
+  on public.documentos (asignatura) where es_lienzo;
+
+-- Bloc de notas de texto por asignatura, privado de cada uno.
+create table if not exists public.notas_asignatura (
+  autor text not null default (auth.jwt() ->> 'email'),
+  asignatura text not null,
+  contenido text not null default '',
+  editado_en timestamptz not null default now(),
+  primary key (autor, asignatura)
+);
+
+alter table public.notas_asignatura enable row level security;
+
+drop policy if exists "notas_asignatura: propias" on public.notas_asignatura;
+create policy "notas_asignatura: propias" on public.notas_asignatura
+  for all
+  using (public.es_usuario_permitido() and autor = auth.jwt() ->> 'email')
+  with check (public.es_usuario_permitido() and autor = auth.jwt() ->> 'email');
