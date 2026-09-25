@@ -17,14 +17,40 @@ const MAX_PIXELES = 12_000_000; // tope por lienzo para que el iPad no se quede 
 
 const redondear = (n) => Math.round(n * 10000) / 10000;
 
+// Copia de seguridad en el propio dispositivo: si cierras la pestaña o se apaga el
+// ordenador antes de que llegue a Supabase, se recupera la próxima vez que abras el documento.
+const claveRespaldo = (id) => `apuntesPendiente:${id}`;
+
+function leerRespaldo(id) {
+  try {
+    return JSON.parse(localStorage.getItem(claveRespaldo(id)) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function escribirRespaldo(id, mapa) {
+  try {
+    if (mapa.size) localStorage.setItem(claveRespaldo(id), JSON.stringify(Object.fromEntries(mapa)));
+    else localStorage.removeItem(claveRespaldo(id));
+  } catch {}
+}
+
 function useDebounceGuardado(documentoId, correo) {
   const pendientes = useRef(new Map()); // pagina → datos
+  const enVuelo = useRef(new Map()); // lo que se está enviando ahora mismo
   const temporizador = useRef(null);
   const [estado, setEstado] = useState("guardado"); // guardado | pendiente | guardando | error
 
+  const respaldar = useCallback(() => {
+    escribirRespaldo(documentoId, new Map([...enVuelo.current, ...pendientes.current]));
+  }, [documentoId]);
+
   const vaciar = useCallback(async () => {
     if (pendientes.current.size === 0) return;
-    const filas = [...pendientes.current.entries()].map(([pagina, d]) => ({
+    enVuelo.current = new Map(pendientes.current);
+    pendientes.current.clear();
+    const filas = [...enVuelo.current.entries()].map(([pagina, d]) => ({
       documento_id: documentoId,
       autor: correo,
       pagina,
@@ -32,36 +58,57 @@ function useDebounceGuardado(documentoId, correo) {
       textos: d.textos,
       actualizado_en: new Date().toISOString(),
     }));
-    pendientes.current.clear();
     setEstado("guardando");
     const { error } = await supabase
       .from("anotaciones")
       .upsert(filas, { onConflict: "documento_id,autor,pagina" });
     if (error) {
-      // se vuelven a poner en cola y se reintenta
-      filas.forEach((f) => {
-        if (!pendientes.current.has(f.pagina))
-          pendientes.current.set(f.pagina, { trazos: f.trazos, textos: f.textos });
+      // se vuelven a poner en cola (sin pisar cambios más nuevos) y se reintenta
+      enVuelo.current.forEach((d, pagina) => {
+        if (!pendientes.current.has(pagina)) pendientes.current.set(pagina, d);
       });
+      enVuelo.current = new Map();
+      respaldar();
       setEstado("error");
       clearTimeout(temporizador.current);
       temporizador.current = setTimeout(vaciar, 5000);
       return;
     }
+    enVuelo.current = new Map();
+    respaldar();
     setEstado(pendientes.current.size ? "pendiente" : "guardado");
-  }, [documentoId, correo]);
+  }, [documentoId, correo, respaldar]);
 
   const programar = useCallback(
     (pagina, datos) => {
       pendientes.current.set(pagina, datos);
+      respaldar(); // se escribe en el dispositivo al instante
       setEstado("pendiente");
       clearTimeout(temporizador.current);
-      temporizador.current = setTimeout(vaciar, 900);
+      temporizador.current = setTimeout(vaciar, 700);
     },
-    [vaciar]
+    [vaciar, respaldar]
+  );
+
+  // Un cambio llegado desde el otro dispositivo sustituye lo que tuviera pendiente esa página
+  const sustituirPendiente = useCallback(
+    (pagina, datos) => {
+      if (pendientes.current.has(pagina)) {
+        pendientes.current.set(pagina, datos);
+        respaldar();
+      }
+    },
+    [respaldar]
+  );
+
+  const hayPendientes = useCallback(
+    () => pendientes.current.size > 0 || enVuelo.current.size > 0,
+    []
   );
 
   useEffect(() => {
+    // En el iPad, cambiar de app o cerrar Safari dispara "hidden": se envía en ese momento.
+    const alOcultar = () => document.visibilityState === "hidden" && vaciar();
     const avisar = (e) => {
       if (pendientes.current.size) {
         vaciar();
@@ -69,15 +116,19 @@ function useDebounceGuardado(documentoId, correo) {
         e.returnValue = "";
       }
     };
+    document.addEventListener("visibilitychange", alOcultar);
+    window.addEventListener("pagehide", vaciar);
     window.addEventListener("beforeunload", avisar);
     return () => {
+      document.removeEventListener("visibilitychange", alOcultar);
+      window.removeEventListener("pagehide", vaciar);
       window.removeEventListener("beforeunload", avisar);
       clearTimeout(temporizador.current);
       vaciar();
     };
   }, [vaciar]);
 
-  return { estado, programar, vaciar };
+  return { estado, programar, vaciar, sustituirPendiente, hayPendientes };
 }
 
 export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc }) {
@@ -97,7 +148,15 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
   const historial = useRef({ atras: [], adelante: [] });
   const [, forzar] = useState(0);
   const contenedor = useRef(null);
-  const { estado, programar, vaciar } = useDebounceGuardado(doc.id, correo);
+  const { estado, programar, vaciar, sustituirPendiente, hayPendientes } = useDebounceGuardado(
+    doc.id,
+    correo
+  );
+  const canal = useRef(null);
+  const [enDirecto, setEnDirecto] = useState(false);
+  const [remotos, setRemotos] = useState({}); // pagina → trazo que se está escribiendo en el otro dispositivo
+  const zoomRef = useRef(null); // envoltorio de las hojas (se escala durante el pellizco)
+  const abortadores = useRef(new Set()); // para cortar un trazo cuando empieza un pellizco
 
   // Preferencias de este dispositivo
   useEffect(() => {
@@ -134,6 +193,14 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
               textos: (f.textos || []).filter((t) => t.t?.trim()),
             })
         );
+        // Lo que quedó sin subir en este dispositivo manda sobre lo de la nube
+        const respaldo = leerRespaldo(doc.id);
+        if (respaldo) {
+          Object.entries(respaldo).forEach(([pagina, d]) => {
+            mapa[pagina] = d;
+            programar(Number(pagina), d);
+          });
+        }
         if (!cancelado) setDatos(mapa);
 
         if (doc.tipo === "pdf") {
@@ -174,36 +241,263 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
   }, [tamanos]);
 
   const ancho = Math.round(anchoBase * zoom);
+  const HUECO = 16;
+
+  // Punto de la pantalla → (página, posición relativa dentro de ella), independiente del zoom
+  const aDocumento = (cx, cy, anchoPx) => {
+    const el = contenedor.current;
+    const anchoEnvoltorio = Math.max(el.clientWidth, anchoPx + 2 * HUECO);
+    const izquierda = (anchoEnvoltorio - anchoPx) / 2;
+    let y = HUECO;
+    for (let i = 0; i < tamanos.length; i++) {
+      const alto = (anchoPx * tamanos[i].h) / tamanos[i].w;
+      if (cy < y + alto + HUECO || i === tamanos.length - 1) {
+        return { i, fx: (cx - izquierda) / anchoPx, fy: (cy - y) / alto };
+      }
+      y += alto + HUECO;
+    }
+    return { i: 0, fx: 0.5, fy: 0 };
+  };
+
+  const aContenido = ({ i, fx, fy }, anchoPx) => {
+    const el = contenedor.current;
+    const anchoEnvoltorio = Math.max(el.clientWidth, anchoPx + 2 * HUECO);
+    let y = HUECO;
+    for (let k = 0; k < i; k++) y += (anchoPx * tamanos[k].h) / tamanos[k].w + HUECO;
+    const alto = (anchoPx * tamanos[i].h) / tamanos[i].w;
+    return { x: (anchoEnvoltorio - anchoPx) / 2 + fx * anchoPx, y: y + fy * alto };
+  };
+
+  const limitar = (z) => Math.min(4, Math.max(0.5, Math.round(z * 100) / 100));
+
+  // Cambia el zoom dejando quieto el punto que está bajo (vx, vy) en la pantalla
+  const zoomAnclado = useCallback(
+    (nuevo, vx, vy, anclaDoc) => {
+      const el = contenedor.current;
+      if (!el || !tamanos) return;
+      const z = limitar(nuevo);
+      const ancla =
+        anclaDoc || aDocumento(el.scrollLeft + vx, el.scrollTop + vy, Math.round(anchoBase * zoom));
+      setZoom(z);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const p = aContenido(ancla, Math.round(anchoBase * z));
+          el.scrollLeft = p.x - vx;
+          el.scrollTop = p.y - vy;
+        })
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tamanos, anchoBase, zoom]
+  );
 
   const cambiarZoom = (nuevo) => {
-    const z = Math.min(3, Math.max(0.5, Math.round(nuevo * 100) / 100));
     const el = contenedor.current;
-    const rel = el ? (el.scrollTop + el.clientHeight / 2) / el.scrollHeight : 0;
-    setZoom(z);
-    requestAnimationFrame(() => {
-      if (el) el.scrollTop = rel * el.scrollHeight - el.clientHeight / 2;
-    });
+    if (el) zoomAnclado(nuevo, el.clientWidth / 2, el.clientHeight / 2);
   };
+
+  // Pellizco con dos dedos (iPad) y pellizco del trackpad / Ctrl+rueda (portátil).
+  // Mientras dura el gesto solo se escala la imagen; al soltar se vuelve a dibujar nítido.
+  useEffect(() => {
+    const el = contenedor.current;
+    const env = zoomRef.current;
+    if (!el || !env || !tamanos) return;
+
+    const toques = new Map();
+    let gesto = null; // { z0, d0, c0, ancla, origen, s, c, tipo }
+    let arrastre = null; // un dedo en el hueco entre páginas
+    let finRueda = null;
+
+    const rect = () => el.getBoundingClientRect();
+
+    const empezar = (cx, cy, d0, tipo) => {
+      const r = rect();
+      const vx = cx - r.left;
+      const vy = cy - r.top;
+      const px = el.scrollLeft + vx;
+      const py = el.scrollTop + vy;
+      gesto = {
+        tipo,
+        z0: zoom,
+        d0,
+        c0: { x: vx, y: vy },
+        c: { x: vx, y: vy },
+        s: 1,
+        ancla: aDocumento(px, py, ancho),
+      };
+      env.style.transformOrigin = `${px - env.offsetLeft}px ${py - env.offsetTop}px`;
+      env.style.willChange = "transform";
+      abortadores.current.forEach((f) => f());
+    };
+
+    const pintar = () => {
+      const s = limitar(gesto.z0 * gesto.s) / gesto.z0;
+      const tx = gesto.c.x - gesto.c0.x;
+      const ty = gesto.c.y - gesto.c0.y;
+      env.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+    };
+
+    const terminar = () => {
+      if (!gesto) return;
+      const g = gesto;
+      gesto = null;
+      env.style.transform = "";
+      env.style.willChange = "";
+      zoomAnclado(g.z0 * g.s, g.c.x, g.c.y, g.ancla);
+    };
+
+    const distancia = () => {
+      const [a, b] = [...toques.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+    const centro = () => {
+      const [a, b] = [...toques.values()];
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    };
+
+    const abajo = (e) => {
+      if (e.pointerType !== "touch") return;
+      toques.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (toques.size === 2) {
+        e.stopPropagation();
+        arrastre = null;
+        const c = centro();
+        empezar(c.x, c.y, distancia(), "pellizco");
+      } else if (toques.size > 2 || gesto) {
+        e.stopPropagation();
+      } else if (!e.target.closest(".capa-vivo")) {
+        // un dedo fuera de las hojas: desplazar
+        arrastre = { x: e.clientX, y: e.clientY, sx: el.scrollLeft, sy: el.scrollTop };
+      }
+    };
+
+    const mover = (e) => {
+      if (e.pointerType !== "touch" || !toques.has(e.pointerId)) return;
+      toques.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (gesto && toques.size >= 2) {
+        e.stopPropagation();
+        const c = centro();
+        const r = rect();
+        gesto.s = distancia() / gesto.d0;
+        gesto.c = { x: c.x - r.left, y: c.y - r.top };
+        pintar();
+      } else if (gesto) {
+        e.stopPropagation();
+      } else if (arrastre) {
+        el.scrollLeft = arrastre.sx - (e.clientX - arrastre.x);
+        el.scrollTop = arrastre.sy - (e.clientY - arrastre.y);
+      }
+    };
+
+    const arriba = (e) => {
+      if (e.pointerType !== "touch" || !toques.has(e.pointerId)) return;
+      toques.delete(e.pointerId);
+      if (gesto) {
+        e.stopPropagation();
+        if (toques.size < 2) terminar();
+      }
+      if (toques.size === 0) arrastre = null;
+    };
+
+    // Trackpad: el pellizco llega como rueda con Ctrl pulsado (también Ctrl+rueda del ratón)
+    const rueda = (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      if (!gesto) empezar(e.clientX, e.clientY, 1, "rueda");
+      // trackpad: deltas pequeños y continuos; ratón: saltos grandes → se limita cada paso
+      const paso = Math.max(-40, Math.min(40, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY));
+      gesto.s *= Math.exp(-paso * 0.008);
+      pintar();
+      clearTimeout(finRueda);
+      finRueda = setTimeout(terminar, 160);
+    };
+
+    const opciones = { capture: true };
+    el.addEventListener("pointerdown", abajo, opciones);
+    el.addEventListener("pointermove", mover, opciones);
+    el.addEventListener("pointerup", arriba, opciones);
+    el.addEventListener("pointercancel", arriba, opciones);
+    el.addEventListener("wheel", rueda, { passive: false });
+    return () => {
+      clearTimeout(finRueda);
+      el.removeEventListener("pointerdown", abajo, opciones);
+      el.removeEventListener("pointermove", mover, opciones);
+      el.removeEventListener("pointerup", arriba, opciones);
+      el.removeEventListener("pointercancel", arriba, opciones);
+      el.removeEventListener("wheel", rueda);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tamanos, zoom, ancho, zoomAnclado]);
+
+  // Canal en directo entre tus dispositivos (iPad ↔ portátil). Solo tus propias anotaciones.
+  useEffect(() => {
+    const ch = supabase.channel(`apuntes-${doc.id}-${correo}`, {
+      config: { broadcast: { self: false } },
+    });
+    ch.on("broadcast", { event: "pagina" }, ({ payload }) => {
+      setDatos((d) => ({ ...d, [payload.pagina]: payload.datos }));
+      setRemotos((r) => ({ ...r, [payload.pagina]: null }));
+      sustituirPendiente(payload.pagina, payload.datos);
+    })
+      .on("broadcast", { event: "vivo" }, ({ payload }) => {
+        setRemotos((r) => ({ ...r, [payload.pagina]: payload.trazo }));
+      })
+      .subscribe((e) => setEnDirecto(e === "SUBSCRIBED"));
+    canal.current = ch;
+    return () => {
+      canal.current = null;
+      supabase.removeChannel(ch);
+    };
+  }, [doc.id, correo, sustituirPendiente]);
+
+  const emitir = useCallback((event, payload) => {
+    canal.current?.send({ type: "broadcast", event, payload });
+  }, []);
+
+  // Al volver a la pestaña (p. ej. tras usar el otro dispositivo) se recarga lo guardado
+  useEffect(() => {
+    const alVolver = async () => {
+      if (document.visibilityState !== "visible" || hayPendientes()) return;
+      const { data } = await supabase
+        .from("anotaciones")
+        .select("pagina, trazos, textos")
+        .eq("documento_id", doc.id);
+      if (!data || hayPendientes()) return;
+      const mapa = {};
+      data.forEach((f) => (mapa[f.pagina] = { trazos: f.trazos || [], textos: f.textos || [] }));
+      setDatos(mapa);
+    };
+    document.addEventListener("visibilitychange", alVolver);
+    return () => document.removeEventListener("visibilitychange", alVolver);
+  }, [doc.id, hayPendientes]);
+
+  // Cambia una página: pantalla, guardado y el otro dispositivo
+  const fijarPagina = useCallback(
+    (pagina, datosPagina) => {
+      setDatos((d) => ({ ...d, [pagina]: datosPagina }));
+      programar(pagina, datosPagina);
+      emitir("pagina", { pagina, datos: datosPagina });
+    },
+    [programar, emitir]
+  );
 
   // Aplica un cambio en una página, lo guarda y lo apunta en el historial
   const aplicar = useCallback(
     (pagina, nuevo, anterior) => {
-      setDatos((d) => ({ ...d, [pagina]: nuevo }));
-      programar(pagina, nuevo);
+      fijarPagina(pagina, nuevo);
       historial.current.atras.push({ pagina, antes: anterior, despues: nuevo });
       if (historial.current.atras.length > 100) historial.current.atras.shift();
       historial.current.adelante = [];
       forzar((n) => n + 1);
     },
-    [programar]
+    [fijarPagina]
   );
 
   const deshacer = () => {
     const paso = historial.current.atras.pop();
     if (!paso) return;
     historial.current.adelante.push(paso);
-    setDatos((d) => ({ ...d, [paso.pagina]: paso.antes }));
-    programar(paso.pagina, paso.antes);
+    fijarPagina(paso.pagina, paso.antes);
     forzar((n) => n + 1);
   };
 
@@ -211,10 +505,26 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
     const paso = historial.current.adelante.pop();
     if (!paso) return;
     historial.current.atras.push(paso);
-    setDatos((d) => ({ ...d, [paso.pagina]: paso.despues }));
-    programar(paso.pagina, paso.despues);
+    fijarPagina(paso.pagina, paso.despues);
     forzar((n) => n + 1);
   };
+
+  // Trazo en curso → otro dispositivo, como mucho 10 veces por segundo
+  const ultimoVivo = useRef({ t: 0, temporizador: null });
+  const enviarVivo = useCallback(
+    (pagina, trazo) => {
+      const u = ultimoVivo.current;
+      clearTimeout(u.temporizador);
+      const mandar = () => {
+        u.t = Date.now();
+        emitir("vivo", { pagina, trazo: trazo && { ...trazo, p: trazo.p.slice() } });
+      };
+      const espera = 100 - (Date.now() - u.t);
+      if (!trazo || espera <= 0) mandar();
+      else u.temporizador = setTimeout(mandar, espera);
+    },
+    [emitir]
+  );
 
   // Atajos de teclado en el portátil
   useEffect(() => {
@@ -299,6 +609,17 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
           </strong>
           <span className={`visor-estado ${estado}`} aria-live="polite">
             {textoEstado}
+          </span>
+          <span
+            className={`en-directo${enDirecto ? " activo" : ""}`}
+            title={
+              enDirecto
+                ? "En directo: lo que escribas aparece a la vez en tus otros dispositivos"
+                : "Sin conexión en directo; se sincroniza al guardar"
+            }
+          >
+            <span className="punto" aria-hidden="true" />
+            <span className="en-directo-texto">{enDirecto ? "En directo" : "Sin directo"}</span>
           </span>
         </div>
 
@@ -406,6 +727,7 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
       <div className="visor-hojas" ref={contenedor} onScroll={alHacerScroll}>
         {error && <p className="fallo visor-aviso">{error}</p>}
         {!error && !tamanos && <p className="aviso visor-aviso">Abriendo…</p>}
+        <div className="hojas-zoom" ref={zoomRef}>
         {tamanos?.map((t, i) => (
           <Hoja
             key={i}
@@ -419,6 +741,9 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
             aplicar={aplicar}
             contenedor={contenedor}
             alVerLapiz={() => !soloLapiz && hayTactil && cambiarSoloLapiz(true)}
+            remoto={remotos[i + 1] || null}
+            enviarVivo={enviarVivo}
+            abortadores={abortadores}
           />
         ))}
         {doc.tipo === "cuaderno" && tamanos && (
@@ -426,6 +751,7 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
             Añadir página
           </button>
         )}
+        </div>
       </div>
 
       {tamanos && (
@@ -441,13 +767,28 @@ const VACIO = { trazos: [], textos: [] };
 
 /* ---------------- Una página ---------------- */
 
-function Hoja({ numero, tamano, ancho, pdf, cuaderno, datos, pincel, aplicar, contenedor, alVerLapiz }) {
+function Hoja({
+  numero,
+  tamano,
+  ancho,
+  pdf,
+  cuaderno,
+  datos,
+  pincel,
+  aplicar,
+  contenedor,
+  alVerLapiz,
+  remoto,
+  enviarVivo,
+  abortadores,
+}) {
   const alto = Math.round((ancho * tamano.h) / tamano.w);
   const refHoja = useRef(null);
   const refFondo = useRef(null);
   const refSub = useRef(null);
   const refTinta = useRef(null);
   const refVivo = useRef(null);
+  const refRemoto = useRef(null);
   const [visible, setVisible] = useState(false);
   const [enfocarTexto, setEnfocarTexto] = useState(null);
   const gesto = useRef(null);
@@ -503,7 +844,7 @@ function Hoja({ numero, tamano, ancho, pdf, cuaderno, datos, pincel, aplicar, co
     if (!sub || !tinta) return;
     const w = visible ? Math.floor(ancho * escala) : 0;
     const h = visible ? Math.floor(alto * escala) : 0;
-    for (const c of [sub, tinta, vivo]) {
+    for (const c of [sub, tinta, vivo, refRemoto.current]) {
       if (c.width !== w) c.width = w;
       if (c.height !== h) c.height = h;
     }
@@ -514,6 +855,31 @@ function Hoja({ numero, tamano, ancho, pdf, cuaderno, datos, pincel, aplicar, co
     ct.clearRect(0, 0, w, h);
     for (const t of datos.trazos) pintarTrazo(t.h === "sub" ? cs : ct, t, w);
   }, [datos.trazos, visible, ancho, alto, escala]);
+
+  // Trazo que se está escribiendo ahora mismo en el otro dispositivo
+  useEffect(() => {
+    const c = refRemoto.current;
+    if (!c || !visible) return;
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+    if (remoto) pintarTrazo(ctx, remoto, c.width);
+  }, [remoto, visible, ancho, escala]);
+
+  // Si empieza un pellizco con el segundo dedo, el trazo del primero se descarta
+  useEffect(() => {
+    const abortar = () => {
+      const g = gesto.current;
+      gesto.current = null;
+      if (g?.tipo === "dibujar") {
+        const vivo = refVivo.current;
+        vivo?.getContext("2d").clearRect(0, 0, vivo.width, vivo.height);
+        enviarVivo(numero, null);
+      }
+    };
+    const set = abortadores.current;
+    set.add(abortar);
+    return () => set.delete(abortar);
+  }, [abortadores, enviarVivo, numero]);
 
   const posicion = (e) => {
     const r = refVivo.current.getBoundingClientRect();
@@ -632,6 +998,7 @@ function Hoja({ numero, tamano, ancho, pdf, cuaderno, datos, pincel, aplicar, co
     const ctx = vivo.getContext("2d");
     ctx.clearRect(0, 0, vivo.width, vivo.height);
     pintarTrazo(ctx, gesto.current.trazo, vivo.width);
+    enviarVivo(numero, gesto.current.trazo);
   };
 
   const cambiarTexto = (id, cambios) => {
@@ -660,6 +1027,11 @@ function Hoja({ numero, tamano, ancho, pdf, cuaderno, datos, pincel, aplicar, co
       {!cuaderno && <canvas ref={refFondo} className="capa" />}
       <canvas ref={refSub} className="capa capa-sub" />
       <canvas ref={refTinta} className="capa" />
+      <canvas
+        ref={refRemoto}
+        className={`capa${remoto?.h === "sub" ? " capa-sub" : ""}`}
+        aria-hidden="true"
+      />
       <canvas
         ref={refVivo}
         className={`capa capa-vivo${pincel.herramienta === "subrayador" ? " capa-sub" : ""}`}
