@@ -131,7 +131,15 @@ function useDebounceGuardado(documentoId, correo) {
   return { estado, programar, vaciar, sustituirPendiente, hayPendientes };
 }
 
-export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc }) {
+export default function VisorApuntes({
+  doc,
+  correo,
+  alCerrar,
+  alActualizarDoc,
+  incrustado = false, // dentro del espacio de apuntes (pestañas / pantalla partida)
+  enfocado = true, // con dos visores a la vez, solo el enfocado responde al teclado
+  alEnfocar,
+}) {
   const [pdf, setPdf] = useState(null);
   const [tamanos, setTamanos] = useState(null); // [{w,h}] en puntos
   const [error, setError] = useState("");
@@ -529,6 +537,7 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
   // Atajos de teclado en el portátil
   useEffect(() => {
     const tecla = (e) => {
+      if (!enfocado) return;
       if (e.target.closest?.("[contenteditable], input, textarea")) return;
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") {
@@ -598,12 +607,19 @@ export default function VisorApuntes({ doc, correo, alCerrar, alActualizarDoc })
   }[estado];
 
   return (
-    <div className="visor" role="dialog" aria-label={doc.titulo}>
+    <div
+      className={`visor${incrustado ? " incrustado" : ""}`}
+      role={incrustado ? "region" : "dialog"}
+      aria-label={doc.titulo}
+      onPointerDownCapture={alEnfocar}
+    >
       <header className="visor-barra">
         <div className="visor-fila">
-          <button className="boton-texto visor-volver" onClick={cerrar}>
-            ← Apuntes
-          </button>
+          {!incrustado && (
+            <button className="boton-texto visor-volver" onClick={cerrar}>
+              ← Apuntes
+            </button>
+          )}
           <strong className="visor-titulo" title={doc.titulo}>
             {doc.titulo}
           </strong>
