@@ -307,15 +307,7 @@ function Resumen({ sesion, correo, ir }) {
             Ver calendario
           </button>
         </div>
-        {CAL_SYNC ? (
-          <iframe
-            className="marco-calendario compacto"
-            src={urlCalendario(CAL_SYNC)}
-            title="Agenda de entregas"
-          />
-        ) : (
-          <p className="aviso">Falta la variable NEXT_PUBLIC_CALENDAR_SYNC_ID en Vercel.</p>
-        )}
+        <Agenda fuente="entregas" dias={14} />
       </section>
 
       <div className="columna-derecha">

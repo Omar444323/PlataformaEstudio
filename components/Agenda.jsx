@@ -92,7 +92,7 @@ export default function Agenda({ fuente = "entregas", dias = 60 }) {
       <div className="agenda">
         <p className="aviso">
           Nada en los próximos {dias} días.{" "}
-          <button className="pestana" onClick={cargar}>
+          <button className="boton-texto" onClick={cargar}>
             actualizar
           </button>
         </p>

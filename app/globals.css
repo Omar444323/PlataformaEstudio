@@ -358,7 +358,6 @@ mark {
   border: 0;
   border-radius: 6px;
 }
-.marco-calendario.compacto { height: 26rem; min-height: 0; }
 
 .selector {
   display: inline-flex;
@@ -1173,8 +1172,8 @@ span.espacio-pestana { padding: 0 0.25rem 0 0.65rem; box-shadow: inset 0 -3px 0 
 .agenda .dia h3 {
   font-size: 0.95rem;
   text-transform: capitalize;
-  color: var(--tinta-suave, #5a6782);
-  border-bottom: 1px solid var(--linea, #d7dce6);
+  color: var(--tinta-suave);
+  border-bottom: 1px solid var(--linea);
   padding-bottom: 0.35rem;
   margin: 0 0 0.6rem;
 }
@@ -1185,24 +1184,27 @@ span.espacio-pestana { padding: 0 0.25rem 0 0.65rem; box-shadow: inset 0 -3px 0 
   display: flex;
   gap: 0.9rem;
   padding: 0.7rem 0.7rem 0.7rem 0.6rem;
-  border-left: 3px solid var(--linea, #d7dce6);
+  border-left: 3px solid var(--linea);
   margin-bottom: 0.35rem;
 }
 
-.evento.urgente { border-left-color: var(--marcador, #ffe066); background: #fffdf2; }
+.evento.urgente {
+  border-left-color: var(--marcador);
+  background: color-mix(in srgb, var(--marcador) 18%, var(--superficie));
+}
 
 .evento .hora {
   flex: 0 0 4.5rem;
   font-variant-numeric: tabular-nums;
   font-size: 0.88rem;
-  color: var(--tinta-suave, #5a6782);
+  color: var(--tinta-suave);
   padding-top: 0.1rem;
 }
 
 .evento .cuerpo { display: flex; flex-direction: column; gap: 0.15rem; }
 .evento .cuerpo strong { font-weight: 600; line-height: 1.35; }
-.evento .falta { font-size: 0.8rem; color: var(--tinta-suave, #5a6782); }
-.evento.urgente .falta { color: #8a6d00; font-weight: 600; }
+.evento .falta { font-size: 0.8rem; color: var(--tinta-suave); }
+.evento.urgente .falta { color: var(--marcador-texto); font-weight: 600; }
 
 @media (max-width: 30rem) {
   .evento { flex-direction: column; gap: 0.25rem; }
