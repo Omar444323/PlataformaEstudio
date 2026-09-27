@@ -8,6 +8,7 @@ import Lienzo from "../components/Lienzo";
 import Horario from "../components/Horario";
 import Apuntes from "../components/Apuntes";
 import Avisos from "../components/Avisos";
+import Agenda from "../components/Agenda";
 import { momento } from "../lib/horario";
 
 const CAL_SYNC = process.env.NEXT_PUBLIC_CALENDAR_SYNC_ID;
@@ -436,24 +437,28 @@ function EnClase({ ir }) {
 
 function CalendarioSync() {
   const [modo, setModo] = useState("AGENDA");
-  if (!CAL_SYNC) {
-    return (
-      <section className="panel">
-        <p>Falta la variable NEXT_PUBLIC_CALENDAR_SYNC_ID en Vercel.</p>
-      </section>
-    );
-  }
   return (
     <section className="panel panel-calendario">
-      <SelectorVista modo={modo} setModo={setModo} />
-      <iframe
-        className="marco-calendario"
-        src={urlCalendario(CAL_SYNC, modo)}
-        title="Calendario Clases Sync"
-      />
-      <p className="aviso nota-al-pie">
-        No añadas eventos aquí: se borran en la siguiente sincronización.
-      </p>
+      <Agenda fuente="entregas" dias={60} />
+      <details className="desplegable">
+        <summary>Ver en Google Calendar</summary>
+        {CAL_SYNC ? (
+          <>
+            <SelectorVista modo={modo} setModo={setModo} />
+            <iframe
+              className="marco-calendario"
+              src={urlCalendario(CAL_SYNC, modo)}
+              title="Calendario Clases Sync"
+            />
+            <p className="aviso nota-al-pie">
+              No añadas eventos aquí: se borran en la siguiente sincronización. En la PWA de iOS
+              este calendario incrustado puede no cargar; la lista de arriba sí.
+            </p>
+          </>
+        ) : (
+          <p className="aviso">Falta la variable NEXT_PUBLIC_CALENDAR_SYNC_ID en Vercel.</p>
+        )}
+      </details>
     </section>
   );
 }
@@ -488,8 +493,6 @@ function CalendarioPersonal({ correo }) {
     setGuardado(v);
   }, []);
 
-  if (guardado === null) return <section className="panel"><p>Cargando…</p></section>;
-
   const idMostrado = guardado || correo;
 
   const guardar = () => {
@@ -502,30 +505,37 @@ function CalendarioPersonal({ correo }) {
 
   return (
     <section className="panel panel-calendario">
-      <SelectorVista modo={modo} setModo={setModo} />
-      <iframe
-        className="marco-calendario"
-        src={urlCalendario(idMostrado, modo)}
-        title="Calendario personal"
-      />
-      <p className="aviso nota-al-pie">
-        Mostrando {idMostrado}. Solo se ve si en este navegador tienes iniciada la sesión de esa
-        cuenta de Google.
-      </p>
+      <Agenda fuente="personal" dias={30} />
       <details className="desplegable">
-        <summary>Mostrar otro calendario</summary>
-        <div className="fila-formulario">
-          <input
-            className="entrada"
-            value={otro}
-            onChange={(e) => setOtro(e.target.value)}
-            placeholder="ID de otro calendario (vacío = el tuyo)"
-            aria-label="ID de otro calendario"
-          />
-          <button className="boton secundario" onClick={guardar}>
-            Guardar
-          </button>
-        </div>
+        <summary>Ver en Google Calendar</summary>
+        {guardado === null ? (
+          <p className="aviso">Cargando…</p>
+        ) : (
+          <>
+            <SelectorVista modo={modo} setModo={setModo} />
+            <iframe
+              className="marco-calendario"
+              src={urlCalendario(idMostrado, modo)}
+              title="Calendario personal"
+            />
+            <p className="aviso nota-al-pie">
+              Mostrando {idMostrado}. El calendario incrustado solo se ve si en este navegador
+              tienes iniciada la sesión de esa cuenta de Google; en la PWA de iOS no suele cargar.
+            </p>
+            <div className="fila-formulario">
+              <input
+                className="entrada"
+                value={otro}
+                onChange={(e) => setOtro(e.target.value)}
+                placeholder="ID de otro calendario (vacío = el tuyo)"
+                aria-label="ID de otro calendario"
+              />
+              <button className="boton secundario" onClick={guardar}>
+                Guardar
+              </button>
+            </div>
+          </>
+        )}
       </details>
     </section>
   );
