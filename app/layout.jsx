@@ -14,7 +14,24 @@ const texto = Inter({
 
 export const metadata = {
   title: "Apuntes y entregas",
-  description: "Calendario de clase y apuntes compartidos",
+  description: "Calendario de clase, apuntes y herramientas de estudio",
+  manifest: "/manifest.json",
+  icons: {
+    icon: "/favicon.png",
+    apple: "/apple-touch-icon.png",
+  },
+  appleWebApp: {
+    capable: true,
+    title: "Apuntes",
+    statusBarStyle: "default",
+  },
+};
+
+export const viewport = {
+  themeColor: "#f7f8fa",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }) {
