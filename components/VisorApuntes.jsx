@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { abrirPdf } from "../lib/pdf";
 
@@ -40,14 +40,16 @@ function useDebounceGuardado(documentoId, correo) {
   const pendientes = useRef(new Map()); // pagina → datos
   const enVuelo = useRef(new Map()); // lo que se está enviando ahora mismo
   const temporizador = useRef(null);
+  const enCurso = useRef(null); // promesa del envío en marcha: nunca hay dos a la vez
   const [estado, setEstado] = useState("guardado"); // guardado | pendiente | guardando | error
 
   const respaldar = useCallback(() => {
     escribirRespaldo(documentoId, new Map([...enVuelo.current, ...pendientes.current]));
   }, [documentoId]);
 
-  const vaciar = useCallback(async () => {
-    if (pendientes.current.size === 0) return;
+  const vaciarRef = useRef(null);
+
+  const enviar = useCallback(async () => {
     enVuelo.current = new Map(pendientes.current);
     pendientes.current.clear();
     const filas = [...enVuelo.current.entries()].map(([pagina, d]) => ({
@@ -71,13 +73,25 @@ function useDebounceGuardado(documentoId, correo) {
       respaldar();
       setEstado("error");
       clearTimeout(temporizador.current);
-      temporizador.current = setTimeout(vaciar, 5000);
+      temporizador.current = setTimeout(() => vaciarRef.current(), 5000);
       return;
     }
     enVuelo.current = new Map();
     respaldar();
     setEstado(pendientes.current.size ? "pendiente" : "guardado");
   }, [documentoId, correo, respaldar]);
+
+  // Los envíos van en fila: si uno sale mientras otro sigue en vuelo, Supabase puede
+  // recibirlos al revés y quedarse con la versión vieja de la página (trazos perdidos).
+  const vaciar = useCallback(() => {
+    if (enCurso.current) return enCurso.current.then(() => vaciarRef.current());
+    if (pendientes.current.size === 0) return Promise.resolve();
+    enCurso.current = enviar().finally(() => {
+      enCurso.current = null;
+    });
+    return enCurso.current;
+  }, [enviar]);
+  vaciarRef.current = vaciar;
 
   const programar = useCallback(
     (pagina, datos) => {
@@ -165,6 +179,9 @@ export default function VisorApuntes({
   const [remotos, setRemotos] = useState({}); // pagina → trazo que se está escribiendo en el otro dispositivo
   const zoomRef = useRef(null); // envoltorio de las hojas (se escala durante el pellizco)
   const abortadores = useRef(new Set()); // para cortar un trazo cuando empieza un pellizco
+  const [inmersivo, setInmersivo] = useState(false);
+  const ancla = useRef(null); // punto del documento que hay que mantener en pantalla al redimensionar
+  const [medido, setMedido] = useState(false); // ya se conoce el ancho real del contenedor
 
   // Preferencias de este dispositivo
   useEffect(() => {
@@ -172,16 +189,19 @@ export default function VisorApuntes({
       setSoloLapiz(localStorage.getItem("apuntesSoloLapiz") === "1");
       const g = localStorage.getItem("apuntesGrosor");
       if (g && GROSORES[g]) setGrosor(g);
+      // la pantalla completa real necesita un toque; al volver se recupera solo el modo CSS.
+      // Con la pantalla partida solo lo recupera el visor enfocado.
+      if (enfocado) setInmersivo(localStorage.getItem("apuntesInmersivo") === "1");
     } catch {}
     setHayTactil(navigator.maxTouchPoints > 0);
   }, []);
 
-  const cambiarSoloLapiz = (v) => {
+  const cambiarSoloLapiz = useCallback((v) => {
     setSoloLapiz(v);
     try {
       localStorage.setItem("apuntesSoloLapiz", v ? "1" : "0");
     } catch {}
-  };
+  }, []);
 
   // Carga del archivo y de mis anotaciones
   useEffect(() => {
@@ -241,7 +261,10 @@ export default function VisorApuntes({
   useEffect(() => {
     const el = contenedor.current;
     if (!el) return;
-    const medir = () => setAnchoBase(Math.min(el.clientWidth - 32, 980));
+    const medir = () => {
+      setMedido(true);
+      setAnchoBase(Math.min(el.clientWidth - 32, 980));
+    };
     medir();
     const ro = new ResizeObserver(medir);
     ro.observe(el);
@@ -312,6 +335,7 @@ export default function VisorApuntes({
     if (!el || !env || !tamanos) return;
 
     const toques = new Map();
+    const lapices = new Set(); // Pencil apoyado: mientras escribe, la palma no cuenta como pellizco
     let gesto = null; // { z0, d0, c0, ancla, origen, s, c, tipo }
     let arrastre = null; // un dedo en el hueco entre páginas
     let finRueda = null;
@@ -364,7 +388,11 @@ export default function VisorApuntes({
     };
 
     const abajo = (e) => {
-      if (e.pointerType !== "touch") return;
+      if (e.pointerType === "pen") {
+        lapices.add(e.pointerId);
+        return;
+      }
+      if (e.pointerType !== "touch" || lapices.size) return;
       toques.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (toques.size === 2) {
         e.stopPropagation();
@@ -398,6 +426,7 @@ export default function VisorApuntes({
     };
 
     const arriba = (e) => {
+      lapices.delete(e.pointerId);
       if (e.pointerType !== "touch" || !toques.has(e.pointerId)) return;
       toques.delete(e.pointerId);
       if (gesto) {
@@ -538,6 +567,11 @@ export default function VisorApuntes({
   useEffect(() => {
     const tecla = (e) => {
       if (!enfocado) return;
+      if (e.key === "Escape" && inmersivo) {
+        e.preventDefault();
+        fijarInmersivo(false);
+        return;
+      }
       if (e.target.closest?.("[contenteditable], input, textarea")) return;
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") {
@@ -569,6 +603,161 @@ export default function VisorApuntes({
     }
   };
 
+  // ---- Última página leída: se guarda en Supabase para seguir en el otro dispositivo ----
+  const [paginaLeida, setPaginaLeida] = useState(null); // null = aún no se sabe
+  const posicion = useRef({ restaurada: false, guardada: null, temporizador: null });
+  const paginaRef = useRef(1);
+  paginaRef.current = paginaActual;
+
+  useEffect(() => {
+    let cancelado = false;
+    const fijar = (pagina, guardada) => {
+      if (cancelado) return;
+      posicion.current.guardada = guardada;
+      setPaginaLeida(pagina);
+    };
+    // si falla la lectura el documento se abre igual, en la página 1
+    supabase
+      .from("posicion_documento")
+      .select("pagina")
+      .eq("correo", correo)
+      .eq("documento_id", doc.id)
+      .maybeSingle()
+      .then(({ data, error }) => (error ? fijar(1, null) : fijar(data?.pagina || 1, data?.pagina ?? null)))
+      .catch(() => fijar(1, null));
+    return () => {
+      cancelado = true;
+    };
+  }, [doc.id, correo]);
+
+  useLayoutEffect(() => {
+    const el = contenedor.current;
+    const pos = posicion.current;
+    if (pos.restaurada || paginaLeida === null || !tamanos || !medido || !el) return;
+    pos.restaurada = true;
+    const n = Math.min(Math.max(1, paginaLeida), tamanos.length);
+    // si ya se ha movido por el documento mientras se leía la posición, no se le mueve
+    if (n > 1 && el.scrollTop === 0) {
+      el.scrollTop = aContenido({ i: n - 1, fx: 0, fy: 0 }, ancho).y - HUECO;
+      setPaginaActual(n);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paginaLeida, tamanos, medido, ancho]);
+
+  const guardarPosicion = useCallback(() => {
+    const pos = posicion.current;
+    clearTimeout(pos.temporizador);
+    const pagina = paginaRef.current;
+    if (!pos.restaurada || pagina === pos.guardada) return;
+    pos.guardada = pagina;
+    supabase
+      .from("posicion_documento")
+      .upsert(
+        { correo, documento_id: doc.id, pagina, actualizado_en: new Date().toISOString() },
+        { onConflict: "correo,documento_id" }
+      )
+      .then(({ error }) => {
+        if (error && pos.guardada === pagina) pos.guardada = null;
+      })
+      .catch(() => {
+        if (pos.guardada === pagina) pos.guardada = null;
+      });
+  }, [correo, doc.id]);
+
+  // con debounce: no se escribe en cada scroll, solo cuando lleva 1,5 s en la misma página
+  useEffect(() => {
+    const pos = posicion.current;
+    if (!pos.restaurada || paginaActual === pos.guardada) return;
+    clearTimeout(pos.temporizador);
+    pos.temporizador = setTimeout(guardarPosicion, 1500);
+  }, [paginaActual, guardarPosicion]);
+
+  // y al salir del documento (cerrar la pestaña, cambiar de app, desmontar el visor)
+  useEffect(() => {
+    const alOcultar = () => document.visibilityState === "hidden" && guardarPosicion();
+    document.addEventListener("visibilitychange", alOcultar);
+    window.addEventListener("pagehide", guardarPosicion);
+    return () => {
+      document.removeEventListener("visibilitychange", alOcultar);
+      window.removeEventListener("pagehide", guardarPosicion);
+      guardarPosicion();
+    };
+  }, [guardarPosicion]);
+
+  // ---- Modo inmersivo ----
+  // Siempre por CSS (el visor pasa a position: fixed), porque Safari del iPhone no tiene
+  // requestFullscreen. Donde existe (escritorio, iPad) se pide además la pantalla completa real.
+  const pantallaReal = useRef(false);
+  const finAncla = useRef(null);
+
+  const fijarInmersivo = (v) => {
+    const el = contenedor.current;
+    if (el && tamanos) {
+      // lo que está arriba del todo en pantalla sigue ahí después de cambiar de tamaño
+      ancla.current = aDocumento(el.scrollLeft + el.clientWidth / 2, el.scrollTop + 1, ancho);
+      clearTimeout(finAncla.current);
+      finAncla.current = setTimeout(() => (ancla.current = null), 1500);
+    }
+    setInmersivo(v);
+    try {
+      localStorage.setItem("apuntesInmersivo", v ? "1" : "0");
+    } catch {}
+    const raiz = document.documentElement;
+    const activo = document.fullscreenElement || document.webkitFullscreenElement;
+    const pedir = raiz.requestFullscreen || raiz.webkitRequestFullscreen;
+    const salir = document.exitFullscreen || document.webkitExitFullscreen;
+    try {
+      const r = v && !activo && pedir ? pedir.call(raiz) : !v && activo && salir ? salir.call(document) : null;
+      r?.catch?.(() => {});
+    } catch {}
+  };
+  const fijarInmersivoRef = useRef(fijarInmersivo);
+  fijarInmersivoRef.current = fijarInmersivo;
+
+  // Esc del navegador o el gesto del iPad cierran la pantalla completa real: se sale también del modo
+  useEffect(() => {
+    const cambio = () => {
+      if (document.fullscreenElement || document.webkitFullscreenElement) pantallaReal.current = true;
+      else if (pantallaReal.current) {
+        pantallaReal.current = false;
+        fijarInmersivoRef.current(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", cambio);
+    document.addEventListener("webkitfullscreenchange", cambio);
+    return () => {
+      document.removeEventListener("fullscreenchange", cambio);
+      document.removeEventListener("webkitfullscreenchange", cambio);
+      clearTimeout(finAncla.current);
+      if (pantallaReal.current) {
+        const salir = document.exitFullscreen || document.webkitExitFullscreen;
+        try {
+          salir?.call(document)?.catch?.(() => {});
+        } catch {}
+      }
+    };
+  }, []);
+
+  // Oculta menú lateral, cabecera, miga de pan y pestañas de apuntes (ver globals.css)
+  useEffect(() => {
+    if (!inmersivo) return;
+    const raiz = document.documentElement;
+    raiz.classList.add("modo-inmersivo");
+    return () => raiz.classList.remove("modo-inmersivo");
+  }, [inmersivo]);
+
+  // Al cambiar el tamaño, las hojas se vuelven a dibujar con el nuevo ancho (los trazos son
+  // relativos a él) y se recoloca el scroll para no perder el sitio.
+  useLayoutEffect(() => {
+    const a = ancla.current;
+    const el = contenedor.current;
+    if (!a || !el || !tamanos) return;
+    const p = aContenido(a, ancho);
+    el.scrollTop = p.y;
+    el.scrollLeft = p.x - el.clientWidth / 2;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ancho, inmersivo]);
+
   const anadirPagina = async () => {
     const paginas = doc.paginas + 1;
     const { error: e } = await supabase
@@ -599,6 +788,11 @@ export default function VisorApuntes({
     [herramienta, colorSub, colorBoli, grosor, soloLapiz]
   );
 
+  // Estable para que Hoja (memorizada) no se vuelva a pintar cuando solo cambia el estado del guardado
+  const alVerLapiz = useCallback(() => {
+    if (!soloLapiz && hayTactil) cambiarSoloLapiz(true);
+  }, [soloLapiz, hayTactil, cambiarSoloLapiz]);
+
   const textoEstado = {
     guardado: "Guardado",
     pendiente: "Sin guardar…",
@@ -608,7 +802,7 @@ export default function VisorApuntes({
 
   return (
     <div
-      className={`visor${incrustado ? " incrustado" : ""}`}
+      className={`visor${incrustado ? " incrustado" : ""}${inmersivo ? " inmersivo" : ""}`}
       role={incrustado ? "region" : "dialog"}
       aria-label={doc.titulo}
       onPointerDownCapture={alEnfocar}
@@ -727,6 +921,18 @@ export default function VisorApuntes({
             </button>
           </div>
 
+          <div className="grupo-herr" role="group" aria-label="Pantalla">
+            <button
+              className="herr"
+              aria-pressed={inmersivo}
+              onClick={() => fijarInmersivo(!inmersivo)}
+              title={inmersivo ? "Salir de pantalla completa (Esc)" : "Pantalla completa"}
+              aria-label={inmersivo ? "Salir de pantalla completa" : "Pantalla completa"}
+            >
+              <IconoHerr id={inmersivo ? "contraer" : "expandir"} />
+            </button>
+          </div>
+
           {hayTactil && (
             <label className="interruptor" title="Con el lápiz escribes y con el dedo te desplazas">
               <input
@@ -756,7 +962,7 @@ export default function VisorApuntes({
             pincel={pincel}
             aplicar={aplicar}
             contenedor={contenedor}
-            alVerLapiz={() => !soloLapiz && hayTactil && cambiarSoloLapiz(true)}
+            alVerLapiz={alVerLapiz}
             remoto={remotos[i + 1] || null}
             enviarVivo={enviarVivo}
             abortadores={abortadores}
@@ -769,6 +975,12 @@ export default function VisorApuntes({
         )}
         </div>
       </div>
+
+      {inmersivo && (
+        <button className="salir-inmersivo" onClick={() => fijarInmersivo(false)} aria-label="Salir de pantalla completa">
+          <IconoHerr id="contraer" />
+        </button>
+      )}
 
       {tamanos && (
         <span className="indicador-pagina">
@@ -783,7 +995,9 @@ const VACIO = { trazos: [], textos: [] };
 
 /* ---------------- Una página ---------------- */
 
-function Hoja({
+// Memorizada: el indicador de guardado, el directo y el resto de estado del visor no la
+// vuelven a renderizar; solo lo hace si cambian sus datos, el ancho o el pincel.
+const Hoja = memo(function Hoja({
   numero,
   tamano,
   ancho,
@@ -1072,7 +1286,7 @@ function Hoja({
       </div>
     </div>
   );
-}
+});
 
 function NotaTexto({ nota, ancho, enfocar, alCambiar, alBorrar }) {
   const ref = useRef(null);
@@ -1157,6 +1371,8 @@ function IconoHerr({ id }) {
     mano: "M8 12V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v7c0 4-2.5 7-6 7-2.5 0-4-1.5-5.5-4L4 12.5a1.5 1.5 0 0 1 2.5-1.5L8 13",
     deshacer: "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-4",
     rehacer: "M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h4",
+    expandir: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
+    contraer: "M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5",
   }[id];
   return (
     <svg className="icono" viewBox="0 0 24 24" aria-hidden="true">
