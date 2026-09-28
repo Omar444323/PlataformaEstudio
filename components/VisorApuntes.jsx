@@ -36,6 +36,80 @@ function escribirRespaldo(id, mapa) {
   } catch {}
 }
 
+// Desplazamiento con el dedo (lo mueve el código, porque .visor-hojas tiene touch-action: none)
+// con inercia al soltar, como el scroll nativo de iOS: se mide la velocidad de los últimos
+// 100 ms y se sigue con requestAnimationFrame frenando poco a poco.
+const FRENADO = 0.998; // por milisegundo, el mismo ritmo que el scroll "normal" de iOS
+const VELOCIDAD_MINIMA = 0.02; // px/ms: por debajo se para
+
+function crearDesplazador(obtenerContenedor) {
+  let muestras = [];
+  let raf = 0;
+
+  const parar = () => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+  };
+
+  return {
+    parar,
+    empezar(x, y) {
+      parar();
+      muestras = [{ x, y, t: performance.now() }];
+    },
+    mover(x, y) {
+      const t = performance.now();
+      muestras.push({ x, y, t });
+      while (muestras.length > 2 && t - muestras[0].t > 100) muestras.shift();
+    },
+    soltar() {
+      const el = obtenerContenedor();
+      const ahora = performance.now();
+      const recientes = muestras.filter((m) => ahora - m.t <= 100);
+      muestras = [];
+      if (!el || recientes.length < 2) return; // se había quedado quieto antes de levantar el dedo
+      try {
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      } catch {}
+      const a = recientes[0];
+      const b = recientes[recientes.length - 1];
+      const dt = b.t - a.t;
+      if (dt <= 0) return;
+      // el contenido va con el dedo: el scroll va al revés
+      let vx = -(b.x - a.x) / dt;
+      let vy = -(b.y - a.y) / dt;
+      if (Math.hypot(vx, vy) < VELOCIDAD_MINIMA * 5) return;
+      let x = el.scrollLeft;
+      let y = el.scrollTop;
+      let previo = ahora;
+      const paso = (t) => {
+        const d = Math.min(t - previo, 32);
+        previo = t;
+        const maxX = el.scrollWidth - el.clientWidth;
+        const maxY = el.scrollHeight - el.clientHeight;
+        x += vx * d;
+        y += vy * d;
+        // al llegar al borde del documento se para ese eje
+        if (x <= 0 || x >= maxX) {
+          x = Math.min(Math.max(x, 0), Math.max(maxX, 0));
+          vx = 0;
+        }
+        if (y <= 0 || y >= maxY) {
+          y = Math.min(Math.max(y, 0), Math.max(maxY, 0));
+          vy = 0;
+        }
+        el.scrollLeft = x;
+        el.scrollTop = y;
+        const f = Math.pow(FRENADO, d);
+        vx *= f;
+        vy *= f;
+        raf = Math.hypot(vx, vy) < VELOCIDAD_MINIMA ? 0 : requestAnimationFrame(paso);
+      };
+      raf = requestAnimationFrame(paso);
+    },
+  };
+}
+
 // Última página leída en este aparato: respaldo inmediato por si Supabase no responde
 const clavePosicion = (id) => `apuntesPagina:${id}`;
 
@@ -199,6 +273,10 @@ export default function VisorApuntes({
   const [remotos, setRemotos] = useState({}); // pagina → trazo que se está escribiendo en el otro dispositivo
   const zoomRef = useRef(null); // envoltorio de las hojas (se escala durante el pellizco)
   const abortadores = useRef(new Set()); // para cortar un trazo cuando empieza un pellizco
+  const refDesplazador = useRef(null); // arrastre con el dedo + inercia (el mismo objeto siempre)
+  if (!refDesplazador.current) refDesplazador.current = crearDesplazador(() => contenedor.current);
+  const desplazador = refDesplazador.current;
+  useEffect(() => () => desplazador.parar(), [desplazador]);
   const [inmersivo, setInmersivo] = useState(false);
   const ancla = useRef(null); // punto del documento que hay que mantener en pantalla al redimensionar
   const [medido, setMedido] = useState(false); // ya se conoce el ancho real del contenedor
@@ -408,6 +486,7 @@ export default function VisorApuntes({
     };
 
     const abajo = (e) => {
+      desplazador.parar(); // volver a tocar (dedo, lápiz o ratón) corta la inercia
       if (e.pointerType === "pen") {
         lapices.add(e.pointerId);
         return;
@@ -424,6 +503,7 @@ export default function VisorApuntes({
       } else if (!e.target.closest(".capa-vivo")) {
         // un dedo fuera de las hojas: desplazar
         arrastre = { x: e.clientX, y: e.clientY, sx: el.scrollLeft, sy: el.scrollTop };
+        desplazador.empezar(e.clientX, e.clientY);
       }
     };
 
@@ -442,6 +522,7 @@ export default function VisorApuntes({
       } else if (arrastre) {
         el.scrollLeft = arrastre.sx - (e.clientX - arrastre.x);
         el.scrollTop = arrastre.sy - (e.clientY - arrastre.y);
+        desplazador.mover(e.clientX, e.clientY);
       }
     };
 
@@ -453,11 +534,16 @@ export default function VisorApuntes({
         e.stopPropagation();
         if (toques.size < 2) terminar();
       }
-      if (toques.size === 0) arrastre = null;
+      if (toques.size === 0) {
+        // tras un pellizco arrastre ya es null: sin inercia
+        if (arrastre && e.type === "pointerup") desplazador.soltar();
+        arrastre = null;
+      }
     };
 
     // Trackpad: el pellizco llega como rueda con Ctrl pulsado (también Ctrl+rueda del ratón)
     const rueda = (e) => {
+      desplazador.parar();
       if (!e.ctrlKey) return;
       e.preventDefault();
       if (!gesto) empezar(e.clientX, e.clientY, 1, "rueda");
@@ -1012,6 +1098,7 @@ export default function VisorApuntes({
             remoto={remotos[i + 1] || null}
             enviarVivo={enviarVivo}
             abortadores={abortadores}
+            desplazador={desplazador}
           />
         ))}
         {doc.tipo === "cuaderno" && tamanos && (
@@ -1057,6 +1144,7 @@ const Hoja = memo(function Hoja({
   remoto,
   enviarVivo,
   abortadores,
+  desplazador,
 }) {
   const alto = Math.round((ancho * tamano.h) / tamano.w);
   const refHoja = useRef(null);
@@ -1174,6 +1262,8 @@ const Hoja = memo(function Hoja({
     if (desplazar) {
       const el = contenedor.current;
       gesto.current = { tipo: "mover", x: e.clientX, y: e.clientY, sx: el.scrollLeft, sy: el.scrollTop };
+      // con el ratón no hay inercia (en el escritorio el arrastre tampoco la tiene)
+      if (e.pointerType !== "mouse") desplazador.empezar(e.clientX, e.clientY);
       return;
     }
 
@@ -1210,6 +1300,7 @@ const Hoja = memo(function Hoja({
       const el = contenedor.current;
       el.scrollLeft = g.sx - (e.clientX - g.x);
       el.scrollTop = g.sy - (e.clientY - g.y);
+      if (e.pointerType !== "mouse") desplazador.mover(e.clientX, e.clientY);
       return;
     }
     const agrupados = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
@@ -1229,11 +1320,13 @@ const Hoja = memo(function Hoja({
     pintarVivo();
   };
 
-  const terminar = () => {
+  const terminar = (e) => {
     const g = gesto.current;
     gesto.current = null;
     if (!g) return;
-    if (g.tipo === "dibujar") {
+    if (g.tipo === "mover") {
+      if (e?.type === "pointerup" && e.pointerType !== "mouse") desplazador.soltar();
+    } else if (g.tipo === "dibujar") {
       const vivo = refVivo.current;
       vivo.getContext("2d").clearRect(0, 0, vivo.width, vivo.height);
       const t = g.trazo;
