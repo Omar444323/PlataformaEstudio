@@ -36,6 +36,26 @@ function escribirRespaldo(id, mapa) {
   } catch {}
 }
 
+// Última página leída en este aparato: respaldo inmediato por si Supabase no responde
+const clavePosicion = (id) => `apuntesPagina:${id}`;
+
+function leerPosicionLocal(id) {
+  try {
+    const p = JSON.parse(localStorage.getItem(clavePosicion(id)) || "null");
+    return p && p.pagina >= 1 ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+function escribirPosicionLocal(id, pagina) {
+  try {
+    const previa = leerPosicionLocal(id);
+    if (previa?.pagina === pagina) return; // no se pisa la hora si no ha cambiado de página
+    localStorage.setItem(clavePosicion(id), JSON.stringify({ pagina, t: Date.now() }));
+  } catch {}
+}
+
 function useDebounceGuardado(documentoId, correo) {
   const pendientes = useRef(new Map()); // pagina → datos
   const enVuelo = useRef(new Map()); // lo que se está enviando ahora mismo
@@ -609,24 +629,43 @@ export default function VisorApuntes({
   const paginaRef = useRef(1);
   paginaRef.current = paginaActual;
 
+  // Se lee a la vez la copia de este aparato y la de Supabase, y manda la más reciente.
+  // Si Supabase falla o tarda más de 2,5 s, se abre con la copia local (o en la página 1).
   useEffect(() => {
     let cancelado = false;
+    let resuelto = false;
+    const local = leerPosicionLocal(doc.id);
     const fijar = (pagina, guardada) => {
-      if (cancelado) return;
+      if (cancelado || resuelto) return;
+      resuelto = true;
       posicion.current.guardada = guardada;
       setPaginaLeida(pagina);
     };
-    // si falla la lectura el documento se abre igual, en la página 1
+    const espera = setTimeout(() => fijar(local?.pagina || 1, null), 2500);
     supabase
       .from("posicion_documento")
-      .select("pagina")
+      .select("pagina, actualizado_en")
       .eq("correo", correo)
       .eq("documento_id", doc.id)
       .maybeSingle()
-      .then(({ data, error }) => (error ? fijar(1, null) : fijar(data?.pagina || 1, data?.pagina ?? null)))
-      .catch(() => fijar(1, null));
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("[posicion_documento] error al leer", error.code, error.message, error);
+          return fijar(local?.pagina || 1, null);
+        }
+        const remota = data ? { pagina: data.pagina, t: Date.parse(data.actualizado_en) || 0 } : null;
+        const elegida = !remota || (local && local.t > remota.t) ? local : remota;
+        // si la copia local es más nueva, guardada = null para que se suba a Supabase
+        fijar(elegida?.pagina || 1, elegida === remota ? remota?.pagina ?? null : null);
+      })
+      .catch((e) => {
+        console.error("[posicion_documento] error al leer", e?.code, e?.message, e);
+        fijar(local?.pagina || 1, null);
+      })
+      .finally(() => clearTimeout(espera));
     return () => {
       cancelado = true;
+      clearTimeout(espera);
     };
   }, [doc.id, correo]);
 
@@ -657,19 +696,26 @@ export default function VisorApuntes({
         { onConflict: "correo,documento_id" }
       )
       .then(({ error }) => {
-        if (error && pos.guardada === pagina) pos.guardada = null;
+        if (!error) return;
+        console.error("[posicion_documento] error al guardar", error.code, error.message, error);
+        if (pos.guardada === pagina) pos.guardada = null;
       })
-      .catch(() => {
+      .catch((e) => {
+        console.error("[posicion_documento] error al guardar", e?.code, e?.message, e);
         if (pos.guardada === pagina) pos.guardada = null;
       });
   }, [correo, doc.id]);
 
-  // con debounce: no se escribe en cada scroll, solo cuando lleva 1,5 s en la misma página
+  // En este aparato se apunta al instante; en Supabase con debounce: no en cada scroll,
+  // solo cuando lleva 1,5 s en la misma página
   useEffect(() => {
     const pos = posicion.current;
-    if (!pos.restaurada || paginaActual === pos.guardada) return;
+    if (!pos.restaurada) return;
+    escribirPosicionLocal(doc.id, paginaActual);
+    if (paginaActual === pos.guardada) return;
     clearTimeout(pos.temporizador);
     pos.temporizador = setTimeout(guardarPosicion, 1500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paginaActual, guardarPosicion]);
 
   // y al salir del documento (cerrar la pestaña, cambiar de app, desmontar el visor)
