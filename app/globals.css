@@ -1245,3 +1245,30 @@ html.modo-inmersivo, .modo-inmersivo body { overflow: hidden; }
   }
   .salir-inmersivo .icono { width: 1.25rem; height: 1.25rem; }
 }
+
+/* ---------- Inicio: la clase que viene después ---------- */
+/* ANEXAR al final de app/globals.css. Mismo estilo que la clase de arriba, más discreto. */
+.clase-despues {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.1rem 0.5rem;
+  margin-top: 0.8rem;
+  padding: 0.55rem 0 0 0.6rem;
+  border-top: 1px solid var(--linea);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--modulo, var(--linea)) 55%, transparent);
+}
+.clase-despues-etiqueta {
+  flex-basis: 100%;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tinta-tenue);
+}
+.clase-despues-nombre {
+  font-family: var(--fuente-titulo), Georgia, serif;
+  font-size: 1rem;
+  color: var(--tinta-suave);
+}
+.clase-despues-detalle { font-size: 0.8rem; color: var(--tinta-tenue); }

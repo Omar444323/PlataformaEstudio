@@ -9,7 +9,7 @@ import Horario from "../components/Horario";
 import Apuntes from "../components/Apuntes";
 import Avisos from "../components/Avisos";
 import Agenda from "../components/Agenda";
-import { momento } from "../lib/horario";
+import { momento, proximasClases, cuandoEs } from "../lib/horario";
 
 const CAL_SYNC = process.env.NEXT_PUBLIC_CALENDAR_SYNC_ID;
 
@@ -382,13 +382,19 @@ function Resumen({ sesion, correo, ir }) {
 function EnClase({ ir }) {
   const [m, setM] = useState(null);
   useEffect(() => {
-    setM(momento());
-    const id = setInterval(() => setM(momento()), 30_000);
+    const leer = () => {
+      const f = new Date();
+      return { ...momento(f), proximas: proximasClases(f, 2) };
+    };
+    setM(leer());
+    const id = setInterval(() => setM(leer()), 30_000);
     return () => clearInterval(id);
   }, []);
   if (!m) return null;
 
-  const { ahora, siguiente, enRecreo, clases, min } = m;
+  const { ahora, siguiente, enRecreo, clases, min, proximas } = m;
+  // La que viene después de la que se muestra arriba (si arriba ya sale la próxima, la siguiente a esa)
+  const despues = !ahora && !enRecreo && siguiente ? proximas[1] : proximas[0];
   const aMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
   let principal;
   let detalle = null;
@@ -397,7 +403,7 @@ function EnClase({ ir }) {
     detalle = `${ahora.modulo} · ${ahora.profe} · hasta las ${ahora.fin}`;
   } else if (enRecreo) {
     principal = "Recreo";
-    detalle = siguiente ? `Después: ${siguiente.nombre} a las ${siguiente.inicio}` : null;
+    detalle = siguiente ? `Hasta las ${siguiente.inicio}` : null;
   } else if (siguiente) {
     const falta = aMin(siguiente.inicio) - min;
     principal = siguiente.nombre;
@@ -416,6 +422,17 @@ function EnClase({ ir }) {
       </div>
       <p className="clase-ahora-nombre">{principal}</p>
       {detalle && <p className="aviso">{detalle}</p>}
+      {despues && (
+        <div className="clase-despues" style={{ "--modulo": despues.color }}>
+          <span className="clase-despues-etiqueta">
+            {despues.enDias === 0 ? "Después" : cuandoEs(despues).replace(/^./, (c) => c.toUpperCase())}
+          </span>
+          <span className="clase-despues-nombre">{despues.nombre}</span>
+          <span className="clase-despues-detalle">
+            {despues.inicio} · {despues.profe}
+          </span>
+        </div>
+      )}
       {(ahora || (siguiente && !enRecreo) || enRecreo) && (
         <button className="boton secundario abrir-apuntes-ahora" onClick={() => ir("apuntes")}>
           Abrir los apuntes de ahora
