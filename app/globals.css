@@ -1210,3 +1210,38 @@ span.espacio-pestana { padding: 0 0.25rem 0 0.65rem; box-shadow: inset 0 -3px 0 
   .evento { flex-direction: column; gap: 0.25rem; }
   .evento .hora { flex: none; }
 }
+
+/* ---------- Apuntes: modo inmersivo (pantalla completa) ---------- */
+/* ANEXAR al final de app/globals.css. Solo CSS, para que funcione también en Safari del
+   iPhone, que no tiene requestFullscreen; en escritorio e iPad se pide además la real. */
+.visor.inmersivo,
+.visor.incrustado.inmersivo {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  flex: none;
+  box-sizing: border-box;
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.visor.inmersivo .visor-barra { padding-top: max(0.4rem, env(safe-area-inset-top)); }
+.modo-inmersivo .lateral,
+.modo-inmersivo .barra-superior,
+.modo-inmersivo .espacio-barra { display: none; }
+html.modo-inmersivo, .modo-inmersivo body { overflow: hidden; }
+
+/* Botón de salir siempre a mano en móvil y tableta (la barra puede quedar lejos del dedo) */
+.salir-inmersivo { display: none; }
+@media (max-width: 48rem), (pointer: coarse) {
+  .visor.inmersivo .salir-inmersivo {
+    position: absolute;
+    left: max(0.75rem, env(safe-area-inset-left));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    z-index: 52;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2.75rem; height: 2.75rem; padding: 0;
+    border: 0; border-radius: 50%;
+    background: rgba(20, 32, 58, 0.75); color: #fff;
+    cursor: pointer; touch-action: manipulation;
+  }
+  .salir-inmersivo .icono { width: 1.25rem; height: 1.25rem; }
+}
