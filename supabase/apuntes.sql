@@ -86,10 +86,11 @@ create policy "apuntes: borrar" on storage.objects
 -- "Activo" = lo que se está dando ahora en clase. Lo comparten los dos.
 alter table public.documentos add column if not exists activo boolean not null default false;
 
--- Un lienzo (cuaderno en blanco) por asignatura; los trazos de cada uno siguen siendo privados.
+-- Lienzos (cuadernos en blanco) dentro de cada carpeta; los trazos de cada uno siguen siendo privados.
 alter table public.documentos add column if not exists es_lienzo boolean not null default false;
-create unique index if not exists documentos_un_lienzo_por_asignatura
-  on public.documentos (asignatura) where es_lienzo;
+-- v3: varios lienzos por asignatura (uno por tema). Antes había un índice único:
+--   CREATE UNIQUE INDEX documentos_un_lienzo_por_asignatura ON public.documentos USING btree (asignatura) WHERE es_lienzo
+drop index if exists public.documentos_un_lienzo_por_asignatura;
 
 -- Bloc de notas de texto por asignatura, privado de cada uno.
 create table if not exists public.notas_asignatura (
