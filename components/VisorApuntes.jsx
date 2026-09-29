@@ -247,6 +247,7 @@ export default function VisorApuntes({
   incrustado = false, // dentro del espacio de apuntes (pestañas / pantalla partida)
   enfocado = true, // con dos visores a la vez, solo el enfocado responde al teclado
   alEnfocar,
+  salto = null, // { texto, titulo, alPulsar }: salta a los apuntes o al lienzo del mismo tema
 }) {
   const [pdf, setPdf] = useState(null);
   const [tamanos, setTamanos] = useState(null); // [{w,h}] en puntos
@@ -1052,6 +1053,22 @@ export default function VisorApuntes({
               +
             </button>
           </div>
+
+          {salto && (
+            <div className="grupo-herr" role="group" aria-label="Cambiar de documento">
+              <button
+                className="herr visor-salto"
+                onClick={() => {
+                  vaciar();
+                  salto.alPulsar();
+                }}
+                title={salto.titulo}
+              >
+                <span aria-hidden="true">⇄</span>
+                <span className="herr-nombre">{salto.texto}</span>
+              </button>
+            </div>
+          )}
 
           <div className="grupo-herr" role="group" aria-label="Pantalla">
             <button
