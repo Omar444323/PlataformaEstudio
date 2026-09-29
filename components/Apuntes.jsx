@@ -10,6 +10,12 @@ import BlocNotas from "./BlocNotas";
 const MAX_MB = 50;
 const SIN_CARPETA = "__sin";
 const nombreCorto = (codigo) => MODULOS[codigo]?.corto || MODULOS[codigo]?.nombre || "Sin carpeta";
+// El lienzo de un tema se llama «Lienzo · <título del PDF>» y vive en su misma carpeta
+const PREFIJO_LIENZO = "Lienzo · ";
+const lienzoDe = (docs, d) =>
+  docs.find((x) => x.es_lienzo && x.asignatura === d.asignatura && x.titulo === PREFIJO_LIENZO + d.titulo);
+const apuntesDe = (docs, l) =>
+  docs.find((x) => !x.es_lienzo && x.asignatura === l.asignatura && PREFIJO_LIENZO + x.titulo === l.titulo);
 
 function idEnUrl() {
   const partes = window.location.hash.slice(1).split("/");
@@ -91,8 +97,13 @@ export default function Apuntes({ correo, alSalir }) {
     } catch {}
   };
 
-  const abrir = useCallback((doc) => {
-    setAbiertas((a) => (a.includes(doc.id) ? a : [...a, doc.id]));
+  // «junto»: id de la pestaña a cuyo lado se abre (si no, al final)
+  const abrir = useCallback((doc, junto) => {
+    setAbiertas((a) => {
+      if (a.includes(doc.id)) return a;
+      const i = junto ? a.indexOf(junto) : -1;
+      return i < 0 ? [...a, doc.id] : [...a.slice(0, i + 1), doc.id, ...a.slice(i + 1)];
+    });
     setSel(doc.id);
     setFoco("der");
   }, []);
@@ -110,7 +121,47 @@ export default function Apuntes({ correo, alSalir }) {
   const porId = useMemo(() => Object.fromEntries((docs || []).map((d) => [d.id, d])), [docs]);
   const partido = dividir && ancho >= 700; // en pantallas estrechas no cabe partido
 
-  const comunes = { docs: docs || [], correo, recargar: cargar, abrir, actualizarDoc, setError };
+  // Salto de un toque entre los apuntes de un tema y su lienzo (lo crea si no existe)
+  const saltando = useRef(false);
+  const saltoDe = (d) => {
+    const lista = docs || [];
+    const irA = (destino) => {
+      if (partido && destino.id === idAhora) return setFoco("izq");
+      abrir(destino, d.id);
+    };
+    if (d.es_lienzo) {
+      const destino = apuntesDe(lista, d);
+      return destino && { texto: "Apuntes", titulo: `Ir a ${destino.titulo}`, alPulsar: () => irA(destino) };
+    }
+    const existente = lienzoDe(lista, d);
+    return {
+      texto: "Lienzo",
+      titulo: existente ? `Ir a ${existente.titulo}` : "Crear el lienzo de este tema y abrirlo al lado",
+      alPulsar: async () => {
+        if (existente) return irA(existente);
+        if (saltando.current) return;
+        saltando.current = true;
+        const { data, error } = await supabase
+          .from("documentos")
+          .insert({
+            titulo: PREFIJO_LIENZO + d.titulo,
+            tipo: "cuaderno",
+            paginas: 1,
+            asignatura: d.asignatura,
+            es_lienzo: true,
+            subido_por: correo,
+          })
+          .select()
+          .single();
+        saltando.current = false;
+        if (error) return setError(error.message);
+        await cargar();
+        irA(data);
+      },
+    };
+  };
+
+  const comunes = { docs: docs || [], correo, recargar: cargar, abrir, actualizarDoc, setError, saltoDe };
 
   const renderPanel = (clave, lado) => {
     const enfocado = !partido || foco === lado;
@@ -132,6 +183,7 @@ export default function Apuntes({ correo, alSalir }) {
         enfocado={enfocado}
         alEnfocar={alEnfocar}
         alActualizarDoc={actualizarDoc}
+        salto={saltoDe(d)}
       />
     );
   };
@@ -164,7 +216,7 @@ export default function Apuntes({ correo, alSalir }) {
                 style={{ "--modulo": MODULOS[d?.asignatura]?.color || "var(--linea)" }}
               >
                 <button className="espacio-pestana-abrir" onClick={() => setSel(id)} title={d?.titulo}>
-                  {d ? (d.es_lienzo ? `Lienzo · ${nombreCorto(d.asignatura)}` : d.titulo) : "…"}
+                  {d ? d.titulo : "…"}
                 </button>
                 <button className="espacio-pestana-cerrar" onClick={() => cerrarPestana(id)} aria-label={`Cerrar ${d?.titulo || ""}`}>
                   ×
@@ -224,7 +276,7 @@ function asignaturaDelMomento() {
   return { codigo: null, motivo: m.clases.length ? "Ahora no tienes clase" : "Hoy no hay clase" };
 }
 
-function PanelAhora({ docs, correo, recargar, abrir, actualizarDoc, setError, enfocado, alEnfocar, alVerDoc }) {
+function PanelAhora({ docs, correo, recargar, abrir, actualizarDoc, setError, saltoDe, enfocado, alEnfocar, alVerDoc }) {
   const [auto, setAuto] = useState(() => ({ codigo: null, motivo: "" }));
   const [elegida, setElegida] = useState(null); // si eliges otra asignatura a mano
   const [vista, setVista] = useState("doc"); // doc | notas | lienzo
@@ -342,7 +394,7 @@ function PanelAhora({ docs, correo, recargar, abrir, actualizarDoc, setError, en
         {codigo && vista === "notas" && <BlocNotas key={codigo} asignatura={codigo} correo={correo} />}
 
         {codigo && vista === "lienzo" && (
-          <LienzoAsignatura key={codigo} asignatura={codigo} correo={correo} docs={docs} recargar={recargar} setError={setError} enfocado={enfocado} alEnfocar={alEnfocar} actualizarDoc={actualizarDoc} />
+          <LienzoAsignatura key={codigo} asignatura={codigo} correo={correo} docs={docs} recargar={recargar} setError={setError} enfocado={enfocado} alEnfocar={alEnfocar} actualizarDoc={actualizarDoc} saltoDe={saltoDe} />
         )}
 
         {codigo && vista === "doc" && actual && (
@@ -354,6 +406,7 @@ function PanelAhora({ docs, correo, recargar, abrir, actualizarDoc, setError, en
             enfocado={enfocado}
             alEnfocar={alEnfocar}
             alActualizarDoc={actualizarDoc}
+            salto={saltoDe(actual)}
           />
         )}
 
@@ -388,11 +441,14 @@ function PanelAhora({ docs, correo, recargar, abrir, actualizarDoc, setError, en
 }
 
 /* =====================================================================
-   Lienzo de una asignatura (un cuaderno en blanco, uno por asignatura)
+   Lienzos de una asignatura en «Ahora» (cuadernos en blanco; puede haber
+   varios, uno por tema). Si no hay ninguno, se crea el general.
    ===================================================================== */
 
-function LienzoAsignatura({ asignatura, correo, docs, recargar, setError, enfocado, alEnfocar, actualizarDoc, bloqueado }) {
-  const existente = docs.find((d) => d.es_lienzo && d.asignatura === asignatura);
+function LienzoAsignatura({ asignatura, correo, docs, recargar, setError, enfocado, alEnfocar, actualizarDoc, saltoDe }) {
+  const suyos = docs.filter((d) => d.es_lienzo && d.asignatura === asignatura); // el más reciente primero
+  const [elegido, setElegido] = useState(null);
+  const existente = suyos.find((d) => d.id === elegido) || suyos[0];
   const creando = useRef(false);
 
   useEffect(() => {
@@ -407,26 +463,35 @@ function LienzoAsignatura({ asignatura, correo, docs, recargar, setError, enfoca
         es_lienzo: true,
         subido_por: correo,
       });
-      // 23505 = ya lo había creado el otro a la vez; basta con recargar
-      if (error && error.code !== "23505") setError(error.message);
+      if (error) setError(error.message);
       await recargar();
       creando.current = false;
     })();
   }, [existente, asignatura, correo, recargar, setError]);
 
   if (!existente) return <p className="aviso panel-vacio">Preparando el lienzo…</p>;
-  if (bloqueado === existente.id)
-    return <p className="aviso panel-vacio">Este lienzo ya está abierto a la izquierda, en «Ahora».</p>;
   return (
-    <VisorApuntes
-      key={existente.id}
-      doc={existente}
-      correo={correo}
-      incrustado
-      enfocado={enfocado}
-      alEnfocar={alEnfocar}
-      alActualizarDoc={actualizarDoc}
-    />
+    <div className="lienzos-asignatura">
+      {suyos.length > 1 && (
+        <div className="ahora-chips lienzos-chips" role="group" aria-label="Lienzo">
+          {suyos.map((d) => (
+            <button key={d.id} className="chip" aria-pressed={existente.id === d.id} onClick={() => setElegido(d.id)}>
+              {d.titulo}
+            </button>
+          ))}
+        </div>
+      )}
+      <VisorApuntes
+        key={existente.id}
+        doc={existente}
+        correo={correo}
+        incrustado
+        enfocado={enfocado}
+        alEnfocar={alEnfocar}
+        alActualizarDoc={actualizarDoc}
+        salto={saltoDe(existente)}
+      />
+    </div>
   );
 }
 
@@ -440,7 +505,7 @@ function Carpetas(props) {
 
   if (abierta) return <Carpeta {...props} codigo={abierta} alVolver={() => setAbierta(null)} />;
 
-  const normales = docs.filter((d) => !d.es_lienzo);
+  const normales = docs; // los lienzos cuentan como un documento más de la carpeta
   const sueltos = normales.filter((d) => !d.asignatura || !MODULOS[d.asignatura]);
 
   return (
@@ -478,15 +543,26 @@ function Carpetas(props) {
   );
 }
 
-function Carpeta({ codigo, alVolver, docs, correo, recargar, abrir, actualizarDoc, setError, enfocado, alEnfocar, bloqueado }) {
-  const [vista, setVista] = useState("docs"); // docs | notas | lienzo
+function Carpeta({ codigo, alVolver, docs, correo, recargar, abrir, actualizarDoc, setError }) {
+  const [vista, setVista] = useState("docs"); // docs | notas
   const [subiendo, setSubiendo] = useState("");
-  const [creando, setCreando] = useState(false);
+  const [creando, setCreando] = useState(false); // false | "cuaderno" | "lienzo"
   const refArchivo = useRef(null);
   const sin = codigo === SIN_CARPETA;
   const m = MODULOS[codigo];
 
-  const lista = docs.filter((d) => !d.es_lienzo && (sin ? !d.asignatura || !MODULOS[d.asignatura] : d.asignatura === codigo));
+  const deAqui = docs.filter((d) => (sin ? !d.asignatura || !MODULOS[d.asignatura] : d.asignatura === codigo));
+  // Cada lienzo de tema justo debajo de sus apuntes; los lienzos sueltos, arriba
+  const emparejados = new Set();
+  const conLienzo = deAqui
+    .filter((d) => !d.es_lienzo)
+    .flatMap((d) => {
+      const l = lienzoDe(deAqui, d);
+      if (!l) return [d];
+      emparejados.add(l.id);
+      return [d, l];
+    });
+  const lista = [...deAqui.filter((d) => d.es_lienzo && !emparejados.has(d.id)), ...conLienzo];
 
   const subir = async (archivos) => {
     const todos = [...archivos];
@@ -530,10 +606,10 @@ function Carpeta({ codigo, alVolver, docs, correo, recargar, abrir, actualizarDo
     recargar();
   };
 
-  const crearCuaderno = async (titulo) => {
+  const crearCuaderno = async (titulo, es_lienzo = false) => {
     const { data, error } = await supabase
       .from("documentos")
-      .insert({ titulo, tipo: "cuaderno", paginas: 1, asignatura: sin ? null : codigo, subido_por: correo })
+      .insert({ titulo, tipo: "cuaderno", paginas: 1, asignatura: sin ? null : codigo, es_lienzo, subido_por: correo })
       .select()
       .single();
     if (error) return setError(error.message);
@@ -546,6 +622,15 @@ function Carpeta({ codigo, alVolver, docs, correo, recargar, abrir, actualizarDo
     const { error } = await supabase.from("documentos").update(cambios).eq("id", d.id);
     if (error) return setError(error.message);
     actualizarDoc({ ...d, ...cambios });
+  };
+
+  const renombrar = async (d) => {
+    const titulo = prompt("Nuevo nombre", d.titulo)?.trim();
+    if (!titulo || titulo === d.titulo) return;
+    // el lienzo del tema sigue al PDF para no perder la pareja
+    const pareja = d.es_lienzo ? null : lienzoDe(docs, d);
+    await cambiar(d, { titulo });
+    if (pareja) await cambiar(pareja, { titulo: PREFIJO_LIENZO + titulo });
   };
 
   const borrar = async (d) => {
@@ -570,7 +655,6 @@ function Carpeta({ codigo, alVolver, docs, correo, recargar, abrir, actualizarDo
             {[
               ["docs", "Documentos"],
               ["notas", "Bloc de notas"],
-              ["lienzo", "Lienzo"],
             ].map(([id, t]) => (
               <button key={id} aria-pressed={vista === id} onClick={() => setVista(id)}>
                 {t}
@@ -582,31 +666,17 @@ function Carpeta({ codigo, alVolver, docs, correo, recargar, abrir, actualizarDo
 
       {vista === "notas" && !sin && <BlocNotas key={codigo} asignatura={codigo} correo={correo} />}
 
-      {vista === "lienzo" && !sin && (
-        <div className="carpeta-lienzo">
-          <LienzoAsignatura
-            key={codigo}
-            asignatura={codigo}
-            correo={correo}
-            docs={docs}
-            recargar={recargar}
-            setError={setError}
-            enfocado={enfocado}
-            alEnfocar={alEnfocar}
-            actualizarDoc={actualizarDoc}
-            bloqueado={bloqueado}
-          />
-        </div>
-      )}
-
       {(vista === "docs" || sin) && (
         <div className="carpeta-docs">
           <div className="apuntes-acciones">
             <button className="boton" onClick={() => refArchivo.current?.click()} disabled={!!subiendo}>
               Subir PDF
             </button>
-            <button className="boton secundario" onClick={() => setCreando((v) => !v)}>
+            <button className="boton secundario" onClick={() => setCreando((v) => (v === "cuaderno" ? false : "cuaderno"))}>
               Cuaderno nuevo
+            </button>
+            <button className="boton secundario" onClick={() => setCreando((v) => (v === "lienzo" ? false : "lienzo"))}>
+              Nuevo lienzo
             </button>
             <input
               ref={refArchivo}
@@ -619,19 +689,41 @@ function Carpeta({ codigo, alVolver, docs, correo, recargar, abrir, actualizarDo
             {subiendo && <span className="aviso">{subiendo}</span>}
           </div>
 
-          {creando && <FormCuaderno alCrear={crearCuaderno} alCancelar={() => setCreando(false)} />}
+          {creando === "cuaderno" && <FormCuaderno alCrear={(t) => crearCuaderno(t)} alCancelar={() => setCreando(false)} />}
+          {creando === "lienzo" && (
+            <FormCuaderno
+              key="lienzo"
+              inicial={sin ? "Lienzo" : PREFIJO_LIENZO + nombreCorto(codigo)}
+              etiqueta="Nombre del lienzo"
+              alCrear={(t) => crearCuaderno(t, true)}
+              alCancelar={() => setCreando(false)}
+            />
+          )}
 
           {lista.length === 0 && (
             <div className="vacio-apuntes">
-              <p>Esta carpeta está vacía. Sube un PDF o crea un cuaderno.</p>
+              <p>Esta carpeta está vacía. Sube un PDF o crea un cuaderno o un lienzo.</p>
             </div>
           )}
 
           <ul className="lista-docs">
             {lista.map((d) => (
-              <li key={d.id} className={`fila-doc${d.activo ? " activo" : ""}`}>
+              <li key={d.id} className={`fila-doc${d.activo ? " activo" : ""}${d.es_lienzo ? " es-lienzo" : ""}`}>
                 <button className="fila-doc-abrir" onClick={() => abrir(d)}>
-                  <span className={`fila-doc-tipo ${d.tipo}`}>{d.tipo === "pdf" ? "PDF" : "Cuaderno"}</span>
+                  <span className={`fila-doc-tipo ${d.es_lienzo ? "lienzo" : d.tipo}`}>
+                    {d.es_lienzo ? (
+                      <>
+                        <svg className="icono" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M4 20c3 0 4-1.5 4-3.5S9.5 13 11 13s3 1 3 3M14.5 12.5 20 5l-1-1-7.5 5.5" />
+                        </svg>
+                        Lienzo
+                      </>
+                    ) : d.tipo === "pdf" ? (
+                      "PDF"
+                    ) : (
+                      "Cuaderno"
+                    )}
+                  </span>
                   <span className="fila-doc-titulo">{d.titulo}</span>
                   <span className="fila-doc-meta">
                     {d.paginas} pág. · {d.subido_por === correo ? "tuyo" : d.subido_por?.split("@")[0]} ·{" "}
@@ -639,10 +731,15 @@ function Carpeta({ codigo, alVolver, docs, correo, recargar, abrir, actualizarDo
                   </span>
                 </button>
                 <div className="fila-doc-acciones">
-                  <label className="interruptor activo-switch" title="Los documentos activos salen en «Ahora» durante la clase">
-                    <input type="checkbox" checked={!!d.activo} onChange={(e) => cambiar(d, { activo: e.target.checked })} />
-                    <span>{d.activo ? "Activo en clase" : "Activo"}</span>
-                  </label>
+                  {!d.es_lienzo && (
+                    <label className="interruptor activo-switch" title="Los documentos activos salen en «Ahora» durante la clase">
+                      <input type="checkbox" checked={!!d.activo} onChange={(e) => cambiar(d, { activo: e.target.checked })} />
+                      <span>{d.activo ? "Activo en clase" : "Activo"}</span>
+                    </label>
+                  )}
+                  <button className="boton-texto" onClick={() => renombrar(d)}>
+                    Renombrar
+                  </button>
                   <select
                     className="selector-asignatura"
                     value={d.asignatura || ""}
@@ -671,8 +768,8 @@ function Carpeta({ codigo, alVolver, docs, correo, recargar, abrir, actualizarDo
   );
 }
 
-function FormCuaderno({ alCrear, alCancelar }) {
-  const [titulo, setTitulo] = useState("");
+function FormCuaderno({ alCrear, alCancelar, inicial = "", etiqueta = "Título del cuaderno" }) {
+  const [titulo, setTitulo] = useState(inicial);
   return (
     <form
       className="form-cuaderno"
@@ -687,7 +784,7 @@ function FormCuaderno({ alCrear, alCancelar }) {
         value={titulo}
         onChange={(e) => setTitulo(e.target.value)}
         placeholder="Título, p. ej. Tema 3 · Nóminas"
-        aria-label="Título del cuaderno"
+        aria-label={etiqueta}
       />
       <button className="boton" type="submit">
         Crear y abrir
