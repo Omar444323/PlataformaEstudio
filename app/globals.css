@@ -1284,3 +1284,46 @@ html.modo-inmersivo, .modo-inmersivo body { overflow: hidden; }
 .visor-salto .herr-nombre { display: inline; }
 .lienzos-asignatura { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .lienzos-chips { padding: 0.5rem 1rem; border-bottom: 1px solid var(--linea); background: var(--papel); }
+
+/* Transporte: EMT y Cercanías */
+:root { --alerta: #a4570a; --alerta-fondo: #fff4e0; }
+@media (prefers-color-scheme: dark) {
+  :root { --alerta: #ffb866; --alerta-fondo: rgba(255, 184, 102, 0.12); }
+}
+.tr-cabecera { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; margin: 1rem 0; }
+.tr-rejilla { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); }
+.tr-tarjeta .bloque-cabecera { flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+.tr-lista { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+.tr-fila {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 0.6rem;
+  padding: 0.45rem 0; border-top: 1px solid var(--linea);
+}
+.tr-fila:first-child { border-top: 0; }
+.tr-linea {
+  min-width: 2.2rem; text-align: center; font-size: 0.78rem; font-weight: 700;
+  padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--tinta); color: var(--superficie);
+}
+.tr-destino { min-width: 0; overflow-wrap: anywhere; color: var(--tinta-suave); font-size: 0.9rem; }
+.tr-min { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tr-retraso { color: var(--alerta); font-weight: 600; }
+.tr-cancelado .tr-destino { text-decoration: line-through; }
+.tr-cancelado .tr-min { color: var(--fallo); }
+.tr-incidencias { list-style: none; margin: 0.5rem 0; padding: 0; display: grid; gap: 0.4rem; }
+.tr-incidencias li, .tr-alerta {
+  color: var(--alerta); background: var(--alerta-fondo); border-left: 3px solid var(--alerta);
+  border-radius: 4px; padding: 0.4rem 0.6rem; font-size: 0.86rem; overflow-wrap: anywhere;
+}
+.tr-resumen-linea { margin: 0.35rem 0 0; font-size: 0.92rem; overflow-wrap: anywhere; }
+.tr-config-lista { list-style: none; margin: 0 0 1rem; padding: 0; }
+.tr-config-lista > li { border-top: 1px solid var(--linea); padding: 0.6rem 0; }
+.tr-config-lista > li:first-child { border-top: 0; }
+.tr-config-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.tr-config-texto { flex: 1; min-width: 12rem; overflow-wrap: anywhere; }
+.tr-config-botones { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.tr-inactiva .tr-config-texto { opacity: 0.55; }
+.tr-formulario { display: grid; gap: 0.8rem; margin: 0.5rem 0 1rem; }
+.tr-campo { display: grid; gap: 0.3rem; }
+.tr-campo > span:first-child { font-size: 0.78rem; font-weight: 600; color: var(--tinta-suave); }
+.tr-campo .entrada { max-width: 100%; }
+.tr-resultados { margin-top: 0.4rem; }
+.tr-buscar { margin-top: 0.4rem; }
