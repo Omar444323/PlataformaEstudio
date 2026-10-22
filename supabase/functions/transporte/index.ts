@@ -224,13 +224,18 @@ function incidenciasDe(feed: any, linea: string, nucleo: string | null, estacion
   for (const e of feed?.entity || []) {
     const a = e.alert;
     if (!a || !avisoActivo(a, ahoraSeg)) continue;
-    const afecta = (a.informedEntity || []).some((ie: any) => {
-      if (ie.stopId && estaciones.includes(String(ie.stopId))) return true;
-      if (!ie.routeId) return false;
-      const r = String(ie.routeId).trim();
-      const mismaLinea = L && (lineaDeRuta(r) === L || lineaDeRuta(r).replace(/[A-Z]$/, "") === L);
-      return mismaLinea && (!nucleo || nucleoDeRuta(r) === nucleo);
-    });
+    // Si el aviso nombra líneas, tiene que ser la nuestra y del mismo núcleo (la C5 de
+    // Madrid, no la de Valencia; sin núcleo conocido no se acepta ninguna). Uno solo de
+    // estación (un ascensor de Atocha) vale si no nombra ninguna línea; si nombra otras, es
+    // de esas (una C2 en Atocha no nos afecta).
+    const entidades = a.informedEntity || [];
+    const rutas = entidades.filter((ie: any) => ie.routeId).map((ie: any) => String(ie.routeId).trim());
+    const afecta = rutas.length
+      ? rutas.some((r: string) => {
+          const mismaLinea = L && (lineaDeRuta(r) === L || lineaDeRuta(r).replace(/[A-Z]$/, "") === L);
+          return mismaLinea && !!nucleo && nucleoDeRuta(r) === nucleo;
+        })
+      : entidades.some((ie: any) => ie.stopId && estaciones.includes(String(ie.stopId).trim()));
     if (!afecta) continue;
     const tr = a.descriptionText?.translation || a.headerText?.translation || [];
     const texto = (tr.find((t: any) => t.language === "es") || tr[0])?.text || "";
