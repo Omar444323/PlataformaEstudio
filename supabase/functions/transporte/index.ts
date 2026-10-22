@@ -9,8 +9,9 @@
 // IMPORTANTE: en esta función la verificación de JWT se queda ACTIVADA (como eventos).
 // Además se comprueba que el correo está en usuarios_permitidos.
 //
-// Secretos: EMT_EMAIL y EMT_PASSWORD (obligatorios). EMT_CLIENT_ID y EMT_PASSKEY si se
-// registra una app en MobilityLabs (dan más cuota); si existen se usan en lugar de los otros.
+// Secretos: EMT_CLIENT_ID y EMT_PASSKEY de una app registrada en MobilityLabs (dan más
+// cuota) y/o EMT_EMAIL y EMT_PASSWORD de la cuenta. Se prueba primero la app y, si la EMT
+// la rechaza (por ejemplo, mientras está pendiente de moderación), la cuenta.
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -104,26 +105,29 @@ let tokenEMT: { valor: string; hasta: number } | null = null;
 let pidiendoToken: Promise<string> | null = null;
 
 async function loginEMT(): Promise<string> {
-  const cabeceras: Record<string, string> = {};
   const clientId = Deno.env.get("EMT_CLIENT_ID");
   const passKey = Deno.env.get("EMT_PASSKEY");
-  if (clientId && passKey) {
-    cabeceras["X-ClientId"] = clientId;
-    cabeceras["passKey"] = passKey;
-  } else {
-    cabeceras["email"] = env("EMT_EMAIL");
-    cabeceras["password"] = env("EMT_PASSWORD");
+  const email = Deno.env.get("EMT_EMAIL");
+  const password = Deno.env.get("EMT_PASSWORD");
+  const intentos: [string, Record<string, string>][] = [];
+  if (clientId && passKey) intentos.push(["app", { "X-ClientId": clientId, passKey }]);
+  if (email && password) intentos.push(["cuenta", { email, password }]);
+  if (!intentos.length) throw new Error("Faltan los secretos de la EMT (EMT_CLIENT_ID y EMT_PASSKEY, o EMT_EMAIL y EMT_PASSWORD)");
+
+  const fallos: string[] = [];
+  for (const [quien, cabeceras] of intentos) {
+    const res = await fetch(`${EMT}/v3/mobilitylabs/user/login/`, { headers: cabeceras });
+    const j = await res.json().catch(() => ({}));
+    const d = j?.data?.[0];
+    if (res.ok && d?.accessToken) {
+      // tokenSecExpiration son segundos hasta que caduca. Margen de 60 s.
+      const segundos = Number(d.tokenSecExpiration) || 3600;
+      tokenEMT = { valor: d.accessToken, hasta: Date.now() + (segundos - 60) * 1000 };
+      return d.accessToken;
+    }
+    fallos.push(`${quien} ${j?.description || res.status}`);
   }
-  const res = await fetch(`${EMT}/v3/mobilitylabs/user/login/`, { headers: cabeceras });
-  const j = await res.json().catch(() => ({}));
-  const d = j?.data?.[0];
-  if (!res.ok || !d?.accessToken) {
-    throw new Error(`Login EMT: ${j?.description || res.status}`);
-  }
-  // tokenSecExpiration son segundos hasta que caduca. Margen de 60 s.
-  const segundos = Number(d.tokenSecExpiration) || 3600;
-  tokenEMT = { valor: d.accessToken, hasta: Date.now() + (segundos - 60) * 1000 };
-  return d.accessToken;
+  throw new Error(`Login EMT: ${fallos.join(", ")}`);
 }
 
 async function obtenerToken(forzar = false): Promise<string> {
