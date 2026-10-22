@@ -181,12 +181,15 @@ async function llegadasEMT(parada: string, linea: string | null) {
   );
   const datos = j?.data?.[0] || {};
   const nombre = datos?.StopInfo?.[0]?.stopName || datos?.StopInfo?.[0]?.Description || null;
+  const geo = datos?.StopInfo?.[0]?.geometry?.coordinates; // [lon, lat]
+  const coords = Array.isArray(geo) && geo.length >= 2 ? { lat: Number(geo[1]), lon: Number(geo[0]) } : await coordsParada(parada);
   const llegadas = (datos.Arrive || [])
     .filter((a: any) => !linea || normLinea(String(a.line)) === normLinea(linea))
     .map((a: any) => {
       const seg = Number(a.estimateArrive);
       return {
         linea: String(a.line),
+        bus: a.bus != null ? String(a.bus) : null, // para que el aviso siga a este autobús
         destino: a.destination || "",
         segundos: seg,
         // La EMT usa 999999 para "más de 20 minutos"
@@ -196,7 +199,20 @@ async function llegadasEMT(parada: string, linea: string | null) {
       };
     })
     .sort((x: any, y: any) => x.segundos - y.segundos);
-  return { nombre, llegadas };
+  return { nombre, coords, llegadas };
+}
+
+// Posición de la parada (para mostrar solo lo más cercano). No cambia: se guarda un día.
+async function coordsParada(parada: string): Promise<{ lat: number; lon: number } | null> {
+  try {
+    return await cacheado(`coords:${parada}`, 86_400_000, async () => {
+      const j = await llamarEMT(`/v1/transport/busemtmad/stops/${encodeURIComponent(parada)}/detail/`);
+      const g = j?.data?.[0]?.stops?.[0]?.geometry?.coordinates;
+      return Array.isArray(g) && g.length >= 2 ? { lat: Number(g[1]), lon: Number(g[0]) } : null;
+    });
+  } catch {
+    return null;
+  }
 }
 
 /* ---------- Renfe ---------- */
@@ -352,7 +368,7 @@ Deno.serve(async (req) => {
           if (!f.parada) return { ...f, llegadas: [], error: "Sin número de parada" };
           try {
             const r = await conLimite(llegadasEMT(String(f.parada), f.linea), "La EMT");
-            return { ...f, nombreParada: r.nombre, llegadas: r.llegadas, error: null };
+            return { ...f, nombreParada: r.nombre, coords: r.coords, llegadas: r.llegadas, error: null };
           } catch (e) {
             return { ...f, llegadas: [], error: e instanceof Error ? e.message : String(e) };
           }
@@ -428,8 +444,8 @@ async function cercaniasDe(admin: any, filas: any[]) {
     const resolver = async (v: string | null) => {
       if (!v) return null;
       if (/^\d{4,5}$/.test(v.trim())) {
-        const { data } = await admin.from("cercanias_estaciones").select("stop_id, nombre").eq("stop_id", v.trim()).maybeSingle();
-        return { codigo: v.trim(), nombre: data?.nombre || v.trim() };
+        const { data } = await admin.from("cercanias_estaciones").select("stop_id, nombre, lat, lon").eq("stop_id", v.trim()).maybeSingle();
+        return { codigo: v.trim(), nombre: data?.nombre || v.trim(), lat: data?.lat ?? null, lon: data?.lon ?? null };
       }
       aviso = "Guarda de nuevo este trayecto para fijar los códigos de estación.";
       const { data } = await admin
@@ -485,6 +501,7 @@ async function cercaniasDe(admin: any, filas: any[]) {
             viaje: v.trip_id,
             linea: v.linea,
             sale: horaCorta(sale),
+            saleMs: sale, // hora programada exacta, para el aviso
             llega: horaCorta(llega),
             saleReal: horaCorta(saleReal),
             minutos: Math.max(0, Math.round((saleReal - ahora) / 60_000)),

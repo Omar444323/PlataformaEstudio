@@ -1352,3 +1352,15 @@ html.modo-inmersivo, .modo-inmersivo body { overflow: hidden; }
   user-select: none;
   -webkit-touch-callout: none;
 }
+
+/* ---------- Transporte: ubicación y avisos a 5 minutos ---------- */
+.tr-fila { grid-template-columns: auto 1fr auto auto; }
+.tr-avisar {
+  font: inherit; font-size: 0.74rem; font-weight: 600; white-space: nowrap;
+  padding: 0.15rem 0.5rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--linea); background: transparent; color: var(--tinta-suave);
+}
+.tr-avisar:hover { color: var(--tinta); border-color: var(--tinta-suave); }
+.tr-avisar.activo { color: var(--alerta); background: var(--alerta-fondo); border-color: var(--alerta); }
+.tr-ubicacion { margin: 0 0 0.75rem; font-size: 0.86rem; }
+.tr-resumen .tr-ubicacion { margin: 0.35rem 0 0; }

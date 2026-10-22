@@ -95,6 +95,209 @@ function useTransporte() {
   return { datos, error, cargando, recargar };
 }
 
+/* ---------- Ubicación: solo lo que tienes a menos de 300 m ---------- */
+
+const RADIO = 300;
+const CLAVE_UBICACION = "transporteUbicacion";
+
+function metros(a, b) {
+  const r = (g) => (g * Math.PI) / 180;
+  const dLat = r(b.lat - a.lat);
+  const dLon = r(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(h));
+}
+
+// Dónde se coge cada cosa: la parada del bus o la estación de origen del trayecto.
+function puntoDe(e) {
+  if (e._tipo === "emt") return e.coords?.lat ? { ...e.coords, nombre: e.nombreParada || `parada ${e.parada}` } : null;
+  return e.origen?.lat ? { lat: e.origen.lat, lon: e.origen.lon, nombre: e.origen.nombre } : null;
+}
+
+// La posición se pide solo si la activaste, y solo se sigue con la app visible. No sale del aparato.
+function useUbicacion() {
+  const [activa, setActiva] = useState(false);
+  const [pos, setPos] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    try {
+      setActiva(localStorage.getItem(CLAVE_UBICACION) === "1");
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!activa || !("geolocation" in navigator)) return;
+    let vigilando = null;
+    const parar = () => {
+      if (vigilando !== null) navigator.geolocation.clearWatch(vigilando);
+      vigilando = null;
+    };
+    const arrancar = () => {
+      parar();
+      if (document.visibilityState !== "visible") return;
+      vigilando = navigator.geolocation.watchPosition(
+        (p) => {
+          setError("");
+          setPos({ lat: p.coords.latitude, lon: p.coords.longitude });
+        },
+        (e) => setError(e.code === 1 ? "Sin permiso de ubicación" : "No se pudo obtener la ubicación"),
+        { enableHighAccuracy: true, maximumAge: 30_000, timeout: 20_000 }
+      );
+    };
+    arrancar();
+    document.addEventListener("visibilitychange", arrancar);
+    return () => {
+      parar();
+      document.removeEventListener("visibilitychange", arrancar);
+    };
+  }, [activa]);
+
+  const cambiar = (v) => {
+    try {
+      localStorage.setItem(CLAVE_UBICACION, v ? "1" : "0");
+    } catch {}
+    setActiva(v);
+    if (!v) setPos(null);
+  };
+
+  return { activa, pos, error, cambiar };
+}
+
+// Si estás a menos de RADIO de algún sitio, solo lo que se coge en el más cercano.
+function filtrarCercano(elementos, pos) {
+  if (!pos) return { visibles: elementos, cerca: null };
+  let mejor = null;
+  for (const e of elementos) {
+    const p = puntoDe(e);
+    if (!p) continue;
+    const d = metros(pos, p);
+    if (!mejor || d < mejor.d) mejor = { d, p };
+  }
+  if (!mejor || mejor.d > RADIO) return { visibles: elementos, cerca: null };
+  const visibles = elementos.filter((e) => {
+    const p = puntoDe(e);
+    return p && metros(mejor.p, p) < 25;
+  });
+  return { visibles, cerca: { nombre: mejor.p.nombre, metros: Math.round(mejor.d) } };
+}
+
+function BarraUbicacion({ ubi, cerca, verTodo, setVerTodo }) {
+  if (!ubi.activa) {
+    return (
+      <p className="tr-ubicacion">
+        <button className="boton-texto" onClick={() => ubi.cambiar(true)}>
+          Mostrar solo lo que tengo cerca
+        </button>
+      </p>
+    );
+  }
+  return (
+    <p className="tr-ubicacion aviso">
+      {ubi.error
+        ? ubi.error
+        : !ubi.pos
+          ? "Buscando tu ubicación…"
+          : cerca
+            ? verTodo
+              ? `Estás cerca de ${cerca.nombre}. `
+              : `Cerca de ${cerca.nombre} (${cerca.metros} m). `
+            : `No hay ninguna parada a menos de ${RADIO} m. `}
+      {cerca && (
+        <button className="boton-texto" onClick={() => setVerTodo(!verTodo)}>
+          {verTodo ? "Solo lo cercano" : "Ver todo"}
+        </button>
+      )}{" "}
+      <button className="boton-texto" onClick={() => ubi.cambiar(false)}>
+        Desactivar ubicación
+      </button>
+    </p>
+  );
+}
+
+/* ---------- Avisos a 5 minutos (notificación push) ---------- */
+
+const CLAVE_PUBLICA = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+const MINUTOS_AVISO = 5;
+
+function base64ABytes(base64) {
+  const relleno = "=".repeat((4 - (base64.length % 4)) % 4);
+  const normal = (base64 + relleno).replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from([...atob(normal)].map((c) => c.charCodeAt(0)));
+}
+
+// Igual que en Avisos: este dispositivo queda suscrito en push_subs.
+async function asegurarPush() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    throw new Error(
+      esIOS
+        ? "En iPhone y iPad, añade la app a la pantalla de inicio desde Safari para recibir avisos."
+        : "Este navegador no admite notificaciones."
+    );
+  }
+  const permiso = await Notification.requestPermission();
+  if (permiso !== "granted") throw new Error("Sin permiso de notificaciones. Cámbialo en los ajustes.");
+  await navigator.serviceWorker.register("/sw.js");
+  const reg = await navigator.serviceWorker.ready;
+  const sub =
+    (await reg.pushManager.getSubscription()) ||
+    (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ABytes(CLAVE_PUBLICA) }));
+  const json = sub.toJSON();
+  const { error } = await supabase
+    .from("push_subs")
+    .upsert({ endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth });
+  if (error) throw new Error(error.message);
+}
+
+function useAvisosTransporte() {
+  const [pendientes, setPendientes] = useState([]);
+  const [error, setError] = useState("");
+
+  const leer = useCallback(async () => {
+    const { data } = await supabase
+      .from("transporte_avisos")
+      .select("id, tipo, parada, linea, viaje, sale")
+      .is("enviado_en", null);
+    setPendientes(data || []);
+  }, []);
+
+  useEffect(() => {
+    leer();
+  }, [leer]);
+
+  const avisar = async (aviso) => {
+    setError("");
+    try {
+      await asegurarPush();
+      const { error } = await supabase.from("transporte_avisos").insert({ ...aviso, minutos: MINUTOS_AVISO });
+      if (error) throw new Error(error.message);
+      await leer();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const cancelar = async (id) => {
+    await supabase.from("transporte_avisos").delete().eq("id", id);
+    await leer();
+  };
+
+  return { pendientes, error, avisar, cancelar };
+}
+
+function BotonAviso({ pendiente, alAvisar, alCancelar }) {
+  return pendiente ? (
+    <button className="tr-avisar activo" onClick={() => alCancelar(pendiente.id)} title="Quitar el aviso">
+      Te aviso
+    </button>
+  ) : (
+    <button className="tr-avisar" onClick={alAvisar} title={`Notificarme ${MINUTOS_AVISO} minutos antes`}>
+      Avísame
+    </button>
+  );
+}
+
 /* ---------- Piezas de presentación ---------- */
 
 function textoMinutos(l) {
@@ -103,7 +306,7 @@ function textoMinutos(l) {
   return `${l.minutos} min`;
 }
 
-function ParadaEMT({ p }) {
+function ParadaEMT({ p, avisos }) {
   return (
     <section className="bloque tr-tarjeta">
       <div className="bloque-cabecera">
@@ -117,20 +320,42 @@ function ParadaEMT({ p }) {
       {!p.error && p.llegadas.length === 0 && <p className="aviso">Sin llegadas previstas ahora mismo.</p>}
       {p.llegadas.length > 0 && (
         <ul className="tr-lista">
-          {p.llegadas.slice(0, 6).map((l, i) => (
-            <li key={i} className="tr-fila">
-              <span className="tr-linea">{l.linea}</span>
-              <span className="tr-destino">{l.destino}</span>
-              <strong className="tr-min">{textoMinutos(l)}</strong>
-            </li>
-          ))}
+          {p.llegadas.slice(0, 6).map((l, i) => {
+            const pendiente = avisos?.pendientes.find(
+              (a) => a.tipo === "emt" && a.parada === String(p.parada) && l.bus && a.viaje === l.bus
+            );
+            return (
+              <li key={i} className="tr-fila">
+                <span className="tr-linea">{l.linea}</span>
+                <span className="tr-destino">{l.destino}</span>
+                <strong className="tr-min">{textoMinutos(l)}</strong>
+                {avisos && !l.masDe20 && l.minutos > 0 && (
+                  <BotonAviso
+                    pendiente={pendiente}
+                    alCancelar={avisos.cancelar}
+                    alAvisar={() =>
+                      avisos.avisar({
+                        tipo: "emt",
+                        etiqueta: `${p.etiqueta} (${l.destino})`,
+                        parada: String(p.parada),
+                        linea: l.linea,
+                        viaje: l.bus,
+                        sale: new Date(Date.now() + l.segundos * 1000).toISOString(),
+                      })
+                    }
+                  />
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
   );
 }
 
-function Tren({ t }) {
+function Tren({ t, trayecto, avisos }) {
+  const pendiente = avisos?.pendientes.find((a) => a.tipo === "cercanias" && a.viaje === t.viaje);
   return (
     <li className={`tr-fila${t.cancelado ? " tr-cancelado" : ""}`}>
       <span className="tr-linea">{t.linea}</span>
@@ -140,6 +365,22 @@ function Tren({ t }) {
         <span className="aviso"> · llega {t.llega}</span>
       </span>
       <strong className="tr-min">{t.cancelado ? "Cancelado" : t.minutos === 0 ? "saliendo" : `${t.minutos} min`}</strong>
+      {avisos && !t.cancelado && t.minutos > 0 && t.saleMs && (
+        <BotonAviso
+          pendiente={pendiente}
+          alCancelar={avisos.cancelar}
+          alAvisar={() =>
+            avisos.avisar({
+              tipo: "cercanias",
+              etiqueta: `${trayecto.etiqueta} de las ${t.sale}`,
+              parada: trayecto.origen.codigo,
+              linea: t.linea,
+              viaje: t.viaje,
+              sale: new Date(t.saleMs).toISOString(),
+            })
+          }
+        />
+      )}
     </li>
   );
 }
@@ -150,7 +391,7 @@ const MENSAJE_HORARIO = {
   sin_estaciones: "Faltan las estaciones de origen y destino. Edita el trayecto.",
 };
 
-function TrayectoCercanias({ t }) {
+function TrayectoCercanias({ t, avisos }) {
   return (
     <section className="bloque tr-tarjeta">
       <div className="bloque-cabecera">
@@ -175,7 +416,7 @@ function TrayectoCercanias({ t }) {
       {t.trenes.length > 0 && (
         <ul className="tr-lista">
           {t.trenes.map((x) => (
-            <Tren key={`${x.viaje}-${x.sale}`} t={x} />
+            <Tren key={`${x.viaje}-${x.sale}`} t={x} trayecto={t} avisos={avisos} />
           ))}
         </ul>
       )}
@@ -210,15 +451,24 @@ export default function Transporte() {
   );
 }
 
-function Ahora({ irAConfig }) {
-  const { datos, error, cargando, recargar } = useTransporte();
-
-  const elementos = datos
+function elementosDe(datos) {
+  return datos
     ? [
         ...datos.emt.paradas.map((p) => ({ ...p, _tipo: "emt" })),
         ...datos.cercanias.trayectos.map((t) => ({ ...t, _tipo: "cercanias" })),
       ].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
     : [];
+}
+
+function Ahora({ irAConfig }) {
+  const { datos, error, cargando, recargar } = useTransporte();
+  const ubi = useUbicacion();
+  const avisos = useAvisosTransporte();
+  const [verTodo, setVerTodo] = useState(false);
+
+  const todos = elementosDe(datos);
+  const { visibles, cerca } = filtrarCercano(todos, ubi.pos);
+  const elementos = verTodo ? todos : visibles;
 
   return (
     <div className="tr">
@@ -232,7 +482,10 @@ function Ahora({ irAConfig }) {
         </button>
       </p>
 
+      <BarraUbicacion ubi={ubi} cerca={cerca} verTodo={verTodo} setVerTodo={setVerTodo} />
+
       {error && <p className="fallo">{error}</p>}
+      {avisos.error && <p className="fallo">{avisos.error}</p>}
       {datos?.emt.error && <p className="fallo">EMT: {datos.emt.error}</p>}
       {datos?.cercanias.error && <p className="fallo">Renfe: {datos.cercanias.error}</p>}
 
@@ -247,7 +500,11 @@ function Ahora({ irAConfig }) {
 
       <div className="tr-rejilla">
         {elementos.map((e) =>
-          e._tipo === "emt" ? <ParadaEMT key={e.id} p={e} /> : <TrayectoCercanias key={e.id} t={e} />
+          e._tipo === "emt" ? (
+            <ParadaEMT key={e.id} p={e} avisos={avisos} />
+          ) : (
+            <TrayectoCercanias key={e.id} t={e} avisos={avisos} />
+          )
         )}
       </div>
     </div>
@@ -258,6 +515,9 @@ function Ahora({ irAConfig }) {
 
 export function TransporteResumen({ ir }) {
   const { datos, error } = useTransporte();
+  const ubi = useUbicacion();
+  const { visibles, cerca } = filtrarCercano(elementosDe(datos), ubi.pos);
+  const verIds = new Set(visibles.map((e) => e.id));
 
   // Lo inmediato: el próximo bus de cada parada, el próximo tren de cada trayecto y las
   // incidencias (las dos direcciones comparten avisos: se muestran una vez).
@@ -267,7 +527,7 @@ export function TransporteResumen({ ir }) {
   let sinIncidencias = false;
 
   if (datos) {
-    for (const p of datos.emt.paradas) {
+    for (const p of datos.emt.paradas.filter((x) => verIds.has(x.id))) {
       const [a, b] = p.llegadas;
       buses.push({
         id: p.id,
@@ -278,7 +538,7 @@ export function TransporteResumen({ ir }) {
             : `${p.etiqueta} · ${p.parada}: sin llegadas ahora`,
       });
     }
-    const tr = datos.cercanias.trayectos;
+    const tr = datos.cercanias.trayectos.filter((x) => verIds.has(x.id));
     for (const t of tr) {
       const prox = t.trenes?.find((x) => !x.cancelado);
       trenes.push({
@@ -306,6 +566,7 @@ export function TransporteResumen({ ir }) {
       </div>
       {!datos && !error && <p className="aviso">Cargando…</p>}
       {error && <p className="aviso">Sin datos de transporte ({error}).</p>}
+      {cerca && <p className="tr-ubicacion aviso">Cerca de {cerca.nombre}</p>}
       {datos && !buses.length && !trenes.length && (
         <p className="aviso">
           <button className="boton-texto" onClick={() => ir("transporte")}>
