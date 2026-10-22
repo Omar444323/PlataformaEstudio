@@ -30,6 +30,7 @@ const sinTildes = (s) =>
     .replace(/[-_.,]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+const normLinea = (s) => (s || "").replace(/[\s-]/g, "").toUpperCase();
 
 /* ---------- ZIP sin dependencias ---------- */
 
@@ -131,7 +132,7 @@ async function cargar() {
 
   const { data: config, error } = await db
     .from("transporte_config")
-    .select("origen, destino")
+    .select("origen, destino, linea")
     .eq("tipo", "cercanias")
     .eq("activo", true);
   if (error) throw new Error(error.message);
@@ -155,14 +156,22 @@ async function cargar() {
 
   // Códigos que hay que cargar. Las filas guardan el código; si alguna antigua guarda
   // el nombre, se resuelve aquí por nombre exacto.
+  // De cada estación se guardan solo las líneas que alguien sigue en ella (por Atocha pasan
+  // casi todas); null = un trayecto sin línea, se guardan todas.
   const porNombre = new Map(estaciones.map((e) => [e.nombre_busqueda, e.stop_id]));
   const codigos = new Set();
+  const lineasDe = new Map(); // codigo -> Set de líneas | null
   for (const f of config || []) {
+    const linea = normLinea(f.linea);
     for (const v of [f.origen, f.destino]) {
       if (!v) continue;
       const t = String(v).trim();
       const codigo = /^\d{4,5}$/.test(t) ? t : porNombre.get(sinTildes(t));
-      if (codigo) codigos.add(codigo);
+      if (!codigo) continue;
+      codigos.add(codigo);
+      const previas = lineasDe.has(codigo) ? lineasDe.get(codigo) : new Set();
+      if (!linea || previas === null) lineasDe.set(codigo, null);
+      else lineasDe.set(codigo, previas.add(linea));
     }
   }
 
@@ -203,11 +212,14 @@ async function cargar() {
       if (!codigos.has(stop)) return;
       const v = viajes.get(c[h.trip_id]);
       if (!v) return;
+      const linea = lineaDeRuta.get(v.route_id) || v.route_id.slice(7);
+      const lineas = lineasDe.get(stop);
+      if (lineas && !lineas.has(normLinea(linea))) return;
       pasos.push({
         trip_id: c[h.trip_id],
         service_id: v.service_id,
         route_id: v.route_id,
-        linea: lineaDeRuta.get(v.route_id) || v.route_id.slice(7),
+        linea,
         stop_id: stop,
         llegada: c[h.arrival_time],
         salida: c[h.departure_time],
