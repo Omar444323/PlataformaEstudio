@@ -259,35 +259,41 @@ function Ahora({ irAConfig }) {
 export function TransporteResumen({ ir }) {
   const { datos, error } = useTransporte();
 
-  let lineaBus = null;
-  let lineaTren = null;
-  let alerta = null;
+  // Lo inmediato: el próximo bus de cada parada, el próximo tren de cada trayecto y las
+  // incidencias (las dos direcciones comparten avisos: se muestran una vez).
+  const buses = [];
+  const trenes = [];
+  const alertas = new Map();
+  let sinIncidencias = false;
 
   if (datos) {
-    const p = datos.emt.paradas[0];
-    if (p) {
+    for (const p of datos.emt.paradas) {
       const [a, b] = p.llegadas;
-      lineaBus = p.error
-        ? `${p.etiqueta}: sin datos`
-        : a
-          ? `${p.etiqueta}: ${textoMinutos(a)}${b ? `, luego ${textoMinutos(b)}` : ""}`
-          : `${p.etiqueta}: sin llegadas ahora`;
+      buses.push({
+        id: p.id,
+        texto: p.error
+          ? `${p.etiqueta}: sin datos`
+          : a
+            ? `${p.etiqueta} · ${p.parada}: ${textoMinutos(a)}${b ? `, luego ${textoMinutos(b)}` : ""}`
+            : `${p.etiqueta} · ${p.parada}: sin llegadas ahora`,
+      });
     }
     const tr = datos.cercanias.trayectos;
-    const conIncidencia = tr.find((t) => t.incidencias?.length);
-    if (conIncidencia) {
-      const texto = conIncidencia.incidencias[0].texto.replace(/^#\S+\s*/, "");
-      alerta = `${conIncidencia.linea}: ${texto.length > 110 ? `${texto.slice(0, 110)}…` : texto}`;
+    for (const t of tr) {
+      const prox = t.trenes?.find((x) => !x.cancelado);
+      trenes.push({
+        id: t.id,
+        texto: prox
+          ? `${t.etiqueta}: ${prox.saleReal}${prox.retrasoMin > 0 ? ` (+${prox.retrasoMin} min)` : ""}, en ${prox.minutos} min`
+          : `${t.etiqueta}: ${t.estadoHorario === "sin_cargar" ? "horario sin cargar" : "sin trenes próximos"}`,
+        retraso: prox?.retrasoMin > 0,
+      });
+      for (const i of t.incidencias || []) {
+        const texto = i.texto.replace(/^#\S+\s*/, "");
+        alertas.set(i.id, `${t.linea}: ${texto.length > 110 ? `${texto.slice(0, 110)}…` : texto}`);
+      }
     }
-    const t = tr[0];
-    const prox = t?.trenes?.find((x) => !x.cancelado);
-    if (t) {
-      lineaTren = prox
-        ? `${t.etiqueta}: ${prox.saleReal}${prox.retrasoMin > 0 ? ` (+${prox.retrasoMin} min)` : ""}, en ${prox.minutos} min`
-        : null;
-    }
-    if (tr.length && !alerta && !lineaTren) lineaTren = "Cercanías sin incidencias";
-    else if (tr.length && !alerta && lineaTren) lineaTren += " · sin incidencias";
+    sinIncidencias = tr.length > 0 && alertas.size === 0 && tr.every((t) => t.incidencias);
   }
 
   return (
@@ -300,16 +306,29 @@ export function TransporteResumen({ ir }) {
       </div>
       {!datos && !error && <p className="aviso">Cargando…</p>}
       {error && <p className="aviso">Sin datos de transporte ({error}).</p>}
-      {datos && !lineaBus && !lineaTren && !alerta && (
+      {datos && !buses.length && !trenes.length && (
         <p className="aviso">
           <button className="boton-texto" onClick={() => ir("transporte")}>
             Configura tus paradas
           </button>
         </p>
       )}
-      {lineaBus && <p className="tr-resumen-linea">{lineaBus}</p>}
-      {alerta && <p className="tr-resumen-linea tr-alerta">{alerta}</p>}
-      {lineaTren && <p className="tr-resumen-linea aviso">{lineaTren}</p>}
+      {buses.map((b) => (
+        <p key={b.id} className="tr-resumen-linea">
+          {b.texto}
+        </p>
+      ))}
+      {trenes.map((t) => (
+        <p key={t.id} className={`tr-resumen-linea${t.retraso ? " tr-retraso" : ""}`}>
+          {t.texto}
+        </p>
+      ))}
+      {[...alertas].map(([id, texto]) => (
+        <p key={id} className="tr-resumen-linea tr-alerta">
+          {texto}
+        </p>
+      ))}
+      {sinIncidencias && <p className="tr-resumen-linea aviso">Cercanías sin incidencias</p>}
     </section>
   );
 }
