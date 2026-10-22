@@ -1327,3 +1327,28 @@ html.modo-inmersivo, .modo-inmersivo body { overflow: hidden; }
 .tr-campo .entrada { max-width: 100%; }
 .tr-resultados { margin-top: 0.4rem; }
 .tr-buscar { margin-top: 0.4rem; }
+
+/* ---------- Apuntes: textos sobre el lienzo que no se seleccionan ---------- */
+/* En el iPad, el Apple Pencil podía seleccionar el número de página como texto y cortar el
+   trazo. Se siguen viendo, pero ni se seleccionan ni reciben el lápiz. Las notas de texto
+   (.nota-editable) siguen editables: su user-select: text va en el propio elemento, como
+   ya ocurre dentro de .hoja. */
+.indicador-pagina,
+.visor-aviso,
+.visor-titulo,
+.visor-estado,
+.en-directo {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.indicador-pagina,
+.visor-aviso {
+  pointer-events: none;
+}
+.visor-hojas,
+.hojas-zoom {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
